@@ -275,7 +275,8 @@ function applyDamageVisuals(app, ev) {
   }
   if (dm.health.nose < 0.3) { const n = car.parts.nose; if (n && n.visible) det(n); }
   for (const id of ['FL', 'FR', 'RL', 'RR']) {
-    if (dm.wheelLost.has(id)) { const pcs = car.detachWheel(id); if (pcs.length) fx.addPieces(pcs, v, 0.8); }
+    // broken suspension: the wheel stays on its tethers, collapsed and badly misaligned
+    if (dm.wheelLost.has(id)) car.setWheelMisalign(id, (id.endsWith('L') ? 1 : -1) * 0.38, (id.endsWith('L') ? -1 : 1) * 0.42, 0.09);
     else car.setWheelMisalign(id, dm.toe[id], dm.camber[id]);
   }
   for (const side of ['L', 'R']) {

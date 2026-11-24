@@ -43,10 +43,10 @@ export class Fx {
     }
   }
   _add(m, vel, severity, big) {
-    const spread = 3 + severity * 8;
+    const spread = 2 + severity * 5;
     const d = {
       m, big,
-      v: new THREE.Vector3(vel.x * (0.6 + Math.random() * 0.3) + (Math.random() - 0.5) * spread, 1 + Math.random() * (2 + severity * 5), vel.z * (0.6 + Math.random() * 0.3) + (Math.random() - 0.5) * spread),
+      v: new THREE.Vector3(vel.x * (0.55 + Math.random() * 0.3) + (Math.random() - 0.5) * spread, 0.5 + Math.random() * (1 + severity * 3), vel.z * (0.55 + Math.random() * 0.3) + (Math.random() - 0.5) * spread),
       w: new THREE.Vector3((Math.random() - 0.5) * 12, (Math.random() - 0.5) * 12, (Math.random() - 0.5) * 12),
       rest: 0, age: 0,
     };

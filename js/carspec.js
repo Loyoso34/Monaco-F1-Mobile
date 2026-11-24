@@ -97,6 +97,8 @@ export function buildCollisionPoints() {
   add('fwR', epX, fwZ, 0.06); add('fwR', epX, Z.FA - 0.62, 0.06);
   add('fwL', -0.55, Z.fwLE + 0.05, 0.06); add('fwR', 0.55, Z.fwLE + 0.05, 0.06);
   add('nose', 0, Z.noseTip + 0.02, 0.09);
+  // survival cell front bulkhead (rigid: stops the car once the nose has crushed)
+  add('tub', 0, Z.FA - 0.20, 0.12); add('tub', 0, Z.fromFA(0.9), 0.28);
   // tyres: three circles along each contact rectangle, outer face
   for (const w of WHEELS) {
     const ox = w.x + Math.sign(w.x) * (w.w / 2 - 0.09);

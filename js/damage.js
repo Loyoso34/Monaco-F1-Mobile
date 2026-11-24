@@ -60,6 +60,20 @@ export class Damage {
     return { severity, newlyBroken: newly, before, after: this.health[part] };
   }
 
+  // Energy a part can still absorb before it breaks (frangible parts: wings, nose, wheels...)
+  absorbable(part) {
+    const spec = PARTS[part];
+    if (!spec) return Infinity;                        // survival cell: rigid
+    return Math.max(300, this.health[part] * spec.strength * J_PER_UNIT);
+  }
+  // Broken-off parts no longer touch anything
+  gone(part) {
+    if (part.startsWith('wheel')) return this.wheelLost.has(part.slice(5));
+    if (part === 'fwL' || part === 'fwR') return this.broken.has(part) || this.broken.has('nose');
+    if (part === 'nose' || part === 'rwL' || part === 'rwR') return this.broken.has(part);
+    return false;
+  }
+
   // continuous scraping (carbon sliding on the barrier): small local wear
   scrape(part, power, dt) {
     if (!PARTS[part]) return;

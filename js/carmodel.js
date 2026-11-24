@@ -679,7 +679,7 @@ export function createCar({ quality = 'high', debugColors = false } = {}) {
     wheels.forEach((wh, i) => {
       if (wh.detached) return;
       const W = wh.spec;
-      wh.corner.position.y = W.y + (state.travel[i] || 0);
+      wh.corner.position.y = W.y + (state.travel[i] || 0) - (wh.drop || 0);
       const steer = W.front ? (i === 0 ? state.steerL ?? state.steer : state.steerR ?? state.steer) : 0;
       wh.steer.rotation.set(0, steer + wh.toe, 0);
       wh.hub.rotation.set(0, 0, wh.camber * (W.left ? -1 : 1));
@@ -731,10 +731,10 @@ export function createCar({ quality = 'high', debugColors = false } = {}) {
     detachedList.push(obj);
     return pieces;
   }
-  function setWheelMisalign(id, toeRad, camberRad) {
+  function setWheelMisalign(id, toeRad, camberRad, drop = 0) {
     const wh = wheels.find(w => w.spec.id === id);
     if (!wh) return;
-    wh.toe = toeRad; wh.camber = camberRad;
+    wh.toe = toeRad; wh.camber = camberRad; wh.drop = drop;
   }
   function detachWheel(id) {
     const wh = wheels.find(w => w.spec.id === id);
@@ -750,7 +750,7 @@ export function createCar({ quality = 'high', debugColors = false } = {}) {
   function repair() {
     for (const o of detachedList) o.visible = true;
     detachedList.length = 0;
-    for (const wh of wheels) { wh.detached = false; wh.toe = 0; wh.camber = 0; wh.corner.visible = true; }
+    for (const wh of wheels) { wh.detached = false; wh.toe = 0; wh.camber = 0; wh.drop = 0; wh.corner.visible = true; }
     for (const k of Object.keys(parts)) { parts[k].visible = true; parts[k].rotation.set(0, 0, 0); parts[k].position.set(0, 0, 0); }
     // restore wheel corner positions (they were reset by the loop above)
     wheels.forEach(wh => wh.corner.position.set(wh.spec.pivotX, wh.spec.y, wh.spec.z));

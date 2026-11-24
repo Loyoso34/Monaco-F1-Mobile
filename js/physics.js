@@ -416,7 +416,7 @@ export class Vehicle {
     const tmp = { s: 0, d: 0 };
     for (let iter = 0; iter < 2; iter++) {
       for (const P of this.points) {
-        if (P.part.startsWith('wheel') && this.damage.wheelLost.has(P.part.slice(5))) continue;
+        if (this.damage.gone(P.part)) continue;
         const fo = -P.z, ro = P.x;
         const px = this.x + rx * ro + fx * fo, pz = this.z + rz * ro + fz * fo;
         const pr = T.project(px, pz, sMid, tmp);
@@ -451,6 +451,10 @@ export class Vehicle {
           const e = vn < -1.2 ? kindE : 0;          // slow contacts don't bounce
           Jn = -(1 + e) * vn / invM;
           const energy = 0.5 * vn * vn / invM;
+          // frangible parts (wings, nose, wheels) only transmit the impulse they can survive;
+          // beyond that they break and the car carries on into the next contact point
+          const cap = this.damage.absorbable(P.part);
+          if (energy > cap) Jn *= Math.sqrt(cap / energy);
           if (iter === 0 && energy > 120) this._registerImpact(P, energy, -vn, (vpx * -nz + vpz * nx), px, pz, isTyre);
         }
         // positional correction (no penetration, no bounce at rest)
