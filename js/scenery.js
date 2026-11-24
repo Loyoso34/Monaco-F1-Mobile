@@ -39,6 +39,16 @@ function coastSide(x, z) {
   }
   return sign * best;
 }
+function polyEdgeDist(x, z, poly) {
+  let best = 1e9;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const [ax, az] = poly[j], [bx, bz] = poly[i];
+    const ex = bx - ax, ez = bz - az, l2 = ex * ex + ez * ez;
+    let t = ((x - ax) * ex + (z - az) * ez) / l2; t = Math.max(0, Math.min(1, t));
+    best = Math.min(best, Math.hypot(x - ax - ex * t, z - az - ez * t));
+  }
+  return best;
+}
 export function isWater(x, z) {
   if (pointInPoly(x, z, HARBOUR)) return true;
   return coastSide(x, z) < 0;
@@ -98,9 +108,12 @@ export function buildScenery(T, { quality = 'high', renderer = null } = {}) {
     if (cs < 0) return -6 - Math.min(30, -cs * 0.2);
     const [dt, ty] = nearestTrack(x, z);
     // inland slope: higher towards the north-west (away from the sea)
-    const inland = Math.max(0, cs - 60);
-    // flat around the circuit (streets, squares), gently rising further inland
-    let h = ty - 0.4 + Math.max(0, dt - 70) * 0.07 + Math.max(0, inland - 120) * 0.03;
+    // distance from the nearest water (open sea or Port Hercule)
+    const shore = Math.min(cs, polyEdgeDist(x, z, HARBOUR));
+    // flat around the circuit (streets, squares, quays), gently rising further inland
+    let h = ty - 0.4;
+    if (dt > 40) h += Math.max(0, dt - 70) * 0.07 + Math.max(0, shore - 150) * 0.03;
+    if (shore < 30) h = Math.min(h, 1.6 + shore * 0.05);   // quays a little above the water
     h = Math.max(h, rockH(x, z));
     // coastal promenade a little above sea level
     if (cs < 25) h = Math.min(h, 1.2 + cs * 0.12);
@@ -164,9 +177,12 @@ export function buildScenery(T, { quality = 'high', renderer = null } = {}) {
     bBuilders[variant].push({ cx, cz, ang, w, dpt, h, baseY, color });
     occupied.push([cx, cz, Math.hypot(w, dpt) / 2]);
   }
+  const cS = (id) => T.corners.find(c => c.id === id).s;
+  const quaySide = (s, side) => side > 0 && T.deltaS(cS('chicane') + 30, s) >= 0 && T.deltaS(s, cS('rascasse') - 10) >= 0;
   const sideBuildings = (side, sFrom, sTo, opts = {}) => {
     let s = sFrom;
     while (s < sTo) {
+      if (quaySide(s, side)) { s += 10; continue; }        // harbour quays: grandstands, yachts
       const w = opts.w ? opts.w() : 12 + R() * 18;
       const sc = T.wrapS(s + w / 2);
       const k = T.idxOfS(sc);
@@ -399,7 +415,7 @@ export function buildScenery(T, { quality = 'high', renderer = null } = {}) {
   grandstand(cs('ste-devote') - 60, cs('ste-devote') + 10, 1, 3);
   grandstand(T.L - 140, T.L - 20, 1, 2.5);
   grandstand(cs('tabac') - 30, cs('tabac') + 50, 1, 6);
-  grandstand(cs('pool1') - 50, cs('pool2') + 40, 1, 6);
+  grandstand(cs('pool1') + 25, cs('pool2') + 40, 1, 6);
   grandstand(cs('rascasse') - 20, cs('rascasse') + 30, 1, 4);
   grandstand(cs('casino') - 80, cs('casino') - 30, 1, 4);
 

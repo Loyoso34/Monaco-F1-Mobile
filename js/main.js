@@ -8,7 +8,7 @@ const P = new URLSearchParams(location.search);
 const DEBUG = {
   autopilot: P.get('autopilot') === '1', shot: P.get('shot'), noaudio: P.get('noaudio') === '1',
   start: P.get('start'), cam: P.get('cam'), quality: P.get('q'), fps: P.get('fps') === '1', s: P.get('s'),
-  norender: P.get('norender') === '1',
+  norender: P.get('norender') === '1', cine: P.get('cine'),
 };
 
 // ---------------------------------------------------------------------------------------------
@@ -151,40 +151,40 @@ async function setup(M) {
 // ---------------------------------------------------------------------------------------------
 // Cinematic menu shots: Sainte Dévote, the Fairmont hairpin, the harbour (and the tunnel exit).
 const SHOTS = [
-  { label: 'Sainte Dévote', sub: 'Turn 1', corner: 'ste-devote', from: [-75, 8.5, 5.0], to: [-38, 9.5, 4.2], look: [25, -2, 0.8], lead: 170, dur: 8 },
-  { label: 'Fairmont Hairpin', sub: 'Turn 6', corner: 'hairpin', from: [-20, -16, 13], to: [10, -16, 11], look: [0, 0, 0.5], lead: 120, dur: 8.5 },
-  { label: 'Port Hercule', sub: 'Tabac · Swimming Pool', corner: 'tabac', from: [-40, 26, 7], to: [40, 30, 8], look: [30, 0, 1.0], lead: 170, dur: 9 },
+  // cam: [s offset from the corner, lateral d (+ left), height]; the camera tracks the car TV-style
+  { label: 'Sainte Dévote', sub: 'Turn 1', corner: 'ste-devote', cam: [22, 12.5, 4.5], lead: 150, dur: 8.5, fov: 36 },
+  { label: 'Fairmont Hairpin', sub: 'Turn 6', corner: 'hairpin', cam: [4, -13, 9], lead: 95, dur: 8.5, fov: 40 },
+  { label: 'Port Hercule', sub: 'Tabac · Swimming Pool', corner: 'pool1', cam: [-35, 36, 11], lead: 170, dur: 9, fov: 36 },
 ];
 
 function startCine(app, i) {
   const { track, veh, car } = app;
   const shot = SHOTS[i % SHOTS.length];
-  app.cine.idx = i; app.cine.t = 0;
+  app.cine.idx = i; app.cine.t = 0; app.cine.look = null;
   const c = track.corners.find(cc => cc.id === shot.corner);
-  veh.reset(track.wrapS(c.s - shot.lead), 0, { speed: 45 });
+  veh.reset(track.wrapS(c.s - shot.lead), app.auto.line.d[track.idxOfS(c.s - shot.lead)], { speed: 40 });
   car.repair();
   $('cineLabel').innerHTML = `<small>${shot.sub}</small>${shot.label}`;
   $('cineLabel').style.opacity = '1';
 }
 
 function updateCine(app, dt) {
-  const { track, camera } = app;
+  const { track, camera, THREE } = app;
   const shot = SHOTS[app.cine.idx % SHOTS.length];
   app.cine.t += dt;
   const c = track.corners.find(cc => cc.id === shot.corner);
-  const u = Math.min(1, app.cine.t / shot.dur);
-  const e = u * u * (3 - 2 * u);
-  const fs = shot.from[0] + (shot.to[0] - shot.from[0]) * e, fd = shot.from[1] + (shot.to[1] - shot.from[1]) * e, fh = shot.from[2] + (shot.to[2] - shot.from[2]) * e;
-  const p = track.pointAt(c.s + fs, fd);
-  camera.position.set(p.x, p.y + fh, p.z);
-  // look at the car when it is in view, otherwise at the corner
-  const lp = track.pointAt(c.s + shot.look[0], shot.look[1]);
-  const target = new app.THREE.Vector3(lp.x, lp.y + shot.look[2], lp.z);
+  const p = track.pointAt(c.s + shot.cam[0], shot.cam[1]);
+  camera.position.set(p.x, p.y + shot.cam[2], p.z);
+  // track the car (smoothly); before it arrives, look at the corner
   const carPos = app.car.root.position;
-  const dCar = carPos.distanceTo(camera.position);
-  if (dCar < 80) target.lerp(new app.THREE.Vector3(carPos.x, carPos.y + 0.6, carPos.z), Math.min(1, (80 - dCar) / 40) * 0.85);
-  camera.lookAt(target);
-  camera.fov = 42; camera.near = 0.1; camera.updateProjectionMatrix();
+  const apex = track.pointAt(c.s, 0);
+  const want = carPos.distanceTo(camera.position) < 160 ? new THREE.Vector3(carPos.x, carPos.y + 0.5, carPos.z) : new THREE.Vector3(apex.x, apex.y + 1, apex.z);
+  if (!app.cine.look) app.cine.look = want.clone();
+  app.cine.look.lerp(want, 1 - Math.exp(-dt * 5));
+  camera.lookAt(app.cine.look);
+  // keep the car right of centre (the menu panel covers the left of the screen)
+  camera.rotateY(0.20 * (innerWidth / innerHeight > 1.6 ? 1 : 0.5));
+  camera.fov = shot.fov; camera.near = 0.1; camera.updateProjectionMatrix();
   if (app.cine.t > shot.dur) startCine(app, app.cine.idx + 1);
 }
 
@@ -200,7 +200,7 @@ function enterMenu(app) {
   app.fx.clear();
   const best = app.timing.best;
   $('menuBest').textContent = best ? `Personal best  ${fmtTime(best)}` : 'Set your first lap around Monaco';
-  startCine(app, 0);
+  startCine(app, DEBUG.cine ? +DEBUG.cine : 0);
 }
 
 function startDriving(app) {
@@ -296,7 +296,7 @@ function syncCarVisual(app) {
     wheelSpin: ws.map(w => w.spin),
     travel: ws.map(w => w.travel),
     pitch: veh.pitch, roll: veh.roll, heave: 0,
-    steeringWheel: veh.delta * 8.0,
+    steeringWheel: veh.delta * 4.4,            // ~100 deg at the 23 deg Monaco lock
     brakeLight: veh.harvest > 0.25 && (Math.floor(app.simTime * 8) % 2 === 0),
   });
 }
@@ -308,6 +308,7 @@ function frame(app) {
   const dtMs = now - app.lastFrame;
   app.lastFrame = now;
   const { veh, car, rig, timing, hud, audio, controls, fx, track } = app;
+  const tA = performance.now();
 
   if (app.state === 'menu' || app.state === 'loadingDone') {
     // autopilot lap behind the cinematic camera
@@ -365,7 +366,11 @@ function frame(app) {
   fx.update(app.state === 'paused' ? 0 : dt);
   updateLighting(app, dt);
   app.sc.waterNormal.offset.x += dt * 0.004; app.sc.waterNormal.offset.y += dt * 0.0025;
+  const tB = performance.now();
   if (!DEBUG.norender) app.renderer.render(app.scene, app.camera);
+  const tC = performance.now();
+  const st = app.stats || (app.stats = { simMs: 0, renderMs: 0, maxSimMs: 0 });
+  st.simMs += (tB - tA - st.simMs) * 0.05; st.renderMs += (tC - tB - st.renderMs) * 0.05; st.maxSimMs = Math.max(st.maxSimMs * 0.999, tB - tA);
   app.perf.frame(dtMs, settings.gfx === 'auto' && !DEBUG.quality);
   requestAnimationFrame(() => frame(app));
 }

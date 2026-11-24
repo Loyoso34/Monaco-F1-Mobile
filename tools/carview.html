@@ -34,7 +34,7 @@ scene.add(sun);
 const car = createCar({ quality: 'high' });
 scene.add(car.root);
 const steer = +(P.get('steer') || 0) * Math.PI / 180;
-car.update({ steer, steeringWheel: steer * 7 });
+car.update({ steer, steeringWheel: steer * 4.4 });
 // ground + 0.1 m grid
 const ground = new THREE.Mesh(new THREE.PlaneGeometry(20, 20), new THREE.MeshStandardMaterial({ color: 0x9aa1a8, roughness: 0.95 }));
 ground.rotation.x = -Math.PI / 2; ground.receiveShadow = true; scene.add(ground);
