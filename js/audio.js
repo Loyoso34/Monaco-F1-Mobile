@@ -100,6 +100,7 @@ export class AudioSystem {
     const limiter = ctx.createDynamicsCompressor();
     limiter.threshold.value = -9; limiter.knee.value = 6; limiter.ratio.value = 8; limiter.attack.value = 0.003; limiter.release.value = 0.18;
     master.connect(limiter); limiter.connect(ctx.destination);
+    this.limiter = limiter;
     this.engineBus = ctx.createGain(); this.fxBus = ctx.createGain();
     this.engineBus.connect(master); this.fxBus.connect(master);
     // tunnel reverb send and wall slap-back

@@ -8,6 +8,7 @@ const P = new URLSearchParams(location.search);
 const DEBUG = {
   autopilot: P.get('autopilot') === '1', shot: P.get('shot'), noaudio: P.get('noaudio') === '1',
   start: P.get('start'), cam: P.get('cam'), quality: P.get('q'), fps: P.get('fps') === '1', s: P.get('s'),
+  norender: P.get('norender') === '1',
 };
 
 // ---------------------------------------------------------------------------------------------
@@ -363,7 +364,7 @@ function frame(app) {
   fx.update(app.state === 'paused' ? 0 : dt);
   updateLighting(app, dt);
   app.sc.waterNormal.offset.x += dt * 0.004; app.sc.waterNormal.offset.y += dt * 0.0025;
-  app.renderer.render(app.scene, app.camera);
+  if (!DEBUG.norender) app.renderer.render(app.scene, app.camera);
   app.perf.frame(dtMs, settings.gfx === 'auto' && !DEBUG.quality);
   requestAnimationFrame(() => frame(app));
 }
