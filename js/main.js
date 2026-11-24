@@ -50,6 +50,25 @@ function setProgress(p, label) {
 }
 const nextFrame = () => new Promise(r => requestAnimationFrame(() => setTimeout(r, 0)));
 
+// iOS / Android only allow audio to start inside a user gesture: create and unlock the
+// AudioContext on the very first tap, even while the game is still loading.
+function unlockAudio() {
+  if (DEBUG.noaudio) return;
+  try {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    if (!window.__actx) {
+      try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch {}
+      window.__actx = new AC({ latencyHint: 'interactive' });
+    }
+    const ctx = window.__actx;
+    const b = ctx.createBufferSource(); b.buffer = ctx.createBuffer(1, 1, ctx.sampleRate); b.connect(ctx.destination); b.start(0);
+    if (ctx.state !== 'running') ctx.resume();
+  } catch {}
+}
+window.addEventListener('pointerdown', unlockAudio, { passive: true });
+window.addEventListener('touchend', unlockAudio, { passive: true });
+
 // "Drive" may be tapped on the loading screen: the run starts the moment loading finishes.
 let driveQueued = false;
 const loadDrive = document.createElement('button');
@@ -323,6 +342,8 @@ function frame(app) {
     let st = controls.steer, th = controls.throttle, br = controls.brake;
     if (DEBUG.autopilot || app.__autoOverride) { const a = app.auto.update(veh, dt); st = a.steer; th = a.throttle; br = a.brake; }
     if (app.state === 'crashed') { th = 0; br = 0.6; }
+    const needTap = !DEBUG.noaudio && audio.ctx && audio.ctx.state !== 'running' && app.state === 'driving';
+    if (needTap !== app.__needTap) { app.__needTap = needTap; $('tapAudio').style.display = needTap ? 'block' : 'none'; }
     veh.setInput(st, th, br);
     stepPhysics(app, dt, true);
     // events

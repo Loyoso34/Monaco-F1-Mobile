@@ -91,7 +91,9 @@ export class AudioSystem {
     try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch {}
     const AC = window.AudioContext || window.webkitAudioContext;
     if (!AC) return;
-    const ctx = this.ctx = new AC({ latencyHint: 'interactive' });
+    // reuse the context unlocked by the first tap (main.js), if any
+    const ctx = this.ctx = window.__actx || new AC({ latencyHint: 'interactive' });
+    window.__actx = ctx;
     // unlock on iOS: a tiny silent buffer inside the gesture
     const sb = ctx.createBufferSource(); sb.buffer = ctx.createBuffer(1, 1, ctx.sampleRate); sb.connect(ctx.destination); sb.start(0);
     if (ctx.state !== 'running') ctx.resume();
