@@ -8,7 +8,8 @@ import { mergeGeometries } from 'three/addons/BufferGeometryUtils.js';
 function rng(seed) { let s = seed >>> 0; return () => ((s = (s * 1664525 + 1013904223) >>> 0) / 4294967296); }
 const R = rng(20240526);
 
-// Coast: land lies to the LEFT of this polyline walking along it (north-west side).
+// Coast polyline (east -> west). The land (north-west) lies on the RIGHT of the walking
+// direction in this x-east / z-south frame; coastSide() > 0 on land.
 const COAST = [
   [1500, -1300], [760, -520], [640, -330], [590, -150], [520, -40], [400, 110], [350, 300],
   [300, 470], [190, 590], [90, 700], [-60, 800], [-260, 860], [-520, 860], [-900, 760], [-1500, 700],
@@ -34,7 +35,7 @@ function coastSide(x, z) {
     const ex = bx - ax, ez = bz - az, l2 = ex * ex + ez * ez;
     let t = ((x - ax) * ex + (z - az) * ez) / l2; t = Math.max(0, Math.min(1, t));
     const qx = ax + ex * t, qz = az + ez * t, d = Math.hypot(x - qx, z - qz);
-    if (d < best) { best = d; const cr = ex * (z - az) - ez * (x - ax); sign = cr < 0 ? 1 : -1; }
+    if (d < best) { best = d; const cr = ex * (z - az) - ez * (x - ax); sign = cr > 0 ? 1 : -1; }
   }
   return sign * best;
 }
@@ -97,9 +98,9 @@ export function buildScenery(T, { quality = 'high', renderer = null } = {}) {
     if (cs < 0) return -6 - Math.min(30, -cs * 0.2);
     const [dt, ty] = nearestTrack(x, z);
     // inland slope: higher towards the north-west (away from the sea)
-    const inland = Math.max(0, cs - 40);
-    const hill = ty + Math.max(0, dt - 25) * 0.16 + inland * 0.06;
-    let h = dt < 25 ? ty - 0.4 : hill;
+    const inland = Math.max(0, cs - 60);
+    // flat around the circuit (streets, squares), gently rising further inland
+    let h = ty - 0.4 + Math.max(0, dt - 70) * 0.07 + Math.max(0, inland - 120) * 0.03;
     h = Math.max(h, rockH(x, z));
     // coastal promenade a little above sea level
     if (cs < 25) h = Math.min(h, 1.2 + cs * 0.12);
@@ -119,14 +120,19 @@ export function buildScenery(T, { quality = 'high', renderer = null } = {}) {
       // urban beige/grey with garden greens inland; rock grey on the Rock's cliffs
       const n = R();
       let c;
-      if (h < -0.5) c = [0.35, 0.38, 0.36];
-      else if (rockH(x, z) > 20 && Math.abs(h - rockH(x, z)) < 1) c = [0.62, 0.6, 0.52];
-      else c = n < 0.3 ? [0.33, 0.42, 0.29] : [0.5, 0.48, 0.45];
+      // Monaco hillsides: dense gardens (umbrella pines, olive) between pale stone terraces
+      if (h < -0.5) c = [0.30, 0.33, 0.31];
+      else if (rockH(x, z) > 20 && Math.abs(h - rockH(x, z)) < 1) c = [0.47, 0.45, 0.39];
+      else c = n < 0.55 ? [0.25 + n * 0.08, 0.33 + n * 0.06, 0.21] : [0.42, 0.40, 0.36];
       col[i * 3] = c[0]; col[i * 3 + 1] = c[1]; col[i * 3 + 2] = c[2];
     }
     g.setAttribute('color', new THREE.BufferAttribute(col, 3));
     g.computeVertexNormals();
-    const terrain = new THREE.Mesh(g, new THREE.MeshLambertMaterial({ vertexColors: true }));
+    const grain = TX.concrete(256, 150);
+    grain.repeat.set((X1 - X0) / 24, (Z1 - Z0) / 24);
+    // UVs for the grain texture
+    const uvA = g.attributes.uv; for (let i = 0; i < uvA.count; i++) uvA.setXY(i, uvA.getX(i), uvA.getY(i));
+    const terrain = new THREE.Mesh(g, new THREE.MeshLambertMaterial({ vertexColors: true, map: grain }));
     terrain.name = 'terrain'; terrain.receiveShadow = false;
     // push the terrain slightly below the road to avoid z-fighting with the track ribbon
     terrain.position.y = -0.25;
@@ -141,14 +147,15 @@ export function buildScenery(T, { quality = 'high', renderer = null } = {}) {
   const occupied = [];
   const free = (x, z, r) => occupied.every(([ox, oz, or]) => Math.hypot(ox - x, oz - z) > r + or);
   const tmpProj = {};
+  const rej = { water: 0, track: 0, free: 0, ok: 0 };
   const clearOfTrack = (pts, sHome) => {
     for (const [x, z] of pts) {
-      if (isWater(x, z)) return false;
+      if (isWater(x, z)) { rej.water++; return false; }
       const pr = T.project(x, z, null, tmpProj);
       if (!pr.ok) continue;
       const bar = pr.d > 0 ? T.sample(T.barL, pr.s) : T.sample(T.barR, pr.s);
       const pit = (pr.s > T.L - 150 || pr.s < 300) && pr.d < 0;
-      if (Math.abs(pr.d) < bar + (pit ? 13.5 : 4.2)) return false;
+      if (Math.abs(pr.d) < bar + (pit ? 13.5 : 4.2)) { rej.track++; return false; }
     }
     return true;
   };
@@ -175,7 +182,10 @@ export function buildScenery(T, { quality = 'high', renderer = null } = {}) {
       const nx = T.nx[k], nz = T.nz[k];
       const pts = [];
       for (const [a, b] of [[-1, -1], [1, -1], [1, 1], [-1, 1], [0, 0]]) pts.push([c.x + tx * a * w / 2 + nx * b * dpt / 2, c.z + tz * a * w / 2 + nz * b * dpt / 2]);
-      if (clearOfTrack(pts) && free(c.x, c.z, Math.hypot(w, dpt) / 2 * 0.8)) {
+      const okT = clearOfTrack(pts), okF = okT && free(c.x, c.z, Math.hypot(w, dpt) / 2 * 0.8);
+      if (okT && !okF) rej.free++;
+      if (okF) rej.ok++;
+      if (okF) {
         const h = opts.h ? opts.h() : 14 + R() * 22 + (R() < 0.12 ? 25 : 0);
         const y = T.py[k] - 1.5;
         building(c.x, c.z, ang, w, dpt, h, y, Math.floor(R() * 3), PALETTE[Math.floor(R() * PALETTE.length)]);
@@ -515,7 +525,7 @@ export function buildScenery(T, { quality = 'high', renderer = null } = {}) {
     root.add(mtn);
   }
 
-  return { root, sky, water, sunDir, nBuildings, terrainH, waterNormal };
+  return { root, sky, water, sunDir, nBuildings, terrainH, waterNormal, rej };
 }
 
 function mergeSimple(list) {

@@ -498,13 +498,20 @@ function setupShot(app, name) {
   show('loading', false); show('menu', false);
   const { track, camera, veh, car } = app;
   const shots = {
-    'loading': { corner: 'ste-devote', s: -55, d: 13, h: 5.5, look: [25, -1, 1.2], car: -10 },
-    'corner-ste-devote': { corner: 'ste-devote', s: -45, d: 12, h: 4.5, look: [20, 0, 1], car: -8 },
-    'corner-casino': { corner: 'casino', s: -45, d: -6, h: 5, look: [15, 0, 2], car: -12 },
+    'loading': { corner: 'ste-devote', s: -62, d: 5.5, h: 7.5, look: [18, -2, 0.5], car: -18 },
+    'corner-ste-devote': { corner: 'ste-devote', s: -55, d: 5, h: 6, look: [18, -2, 0.5], car: -14 },
+    'corner-casino': { corner: 'casino', s: -48, d: -2, h: 6, look: [12, 0, 1.5], car: -14 },
     'corner-hairpin': { corner: 'hairpin', s: -15, d: -14, h: 14, look: [0, 0, 0], car: -2 },
     'corner-tunnel': { corner: 'tunnel', s: 180, d: 1.5, h: 2.2, look: [240, 0, 1.2], car: 205, tunnel: true },
-    'corner-pool': { corner: 'pool1', s: -40, d: 20, h: 8, look: [25, 0, 1], car: -6 },
+    'corner-pool': { corner: 'pool1', s: -55, d: 3, h: 8, look: [20, -1, 0.5], car: -12 },
   };
+  if (name === 'map') {
+    const cam = new app.THREE.OrthographicCamera(-700, 700, 700 * innerHeight / innerWidth, -700 * innerHeight / innerWidth, 1, 3000);
+    cam.position.set(180, 1500, 0); cam.up.set(0, 0, -1); cam.lookAt(180, 0, 0);
+    app.renderer.render(app.scene, cam);
+    window.__info = { buildings: app.sc.nBuildings, rej: app.sc.rej };
+    window.__ready = true; return;
+  }
   const sh = shots[name] || shots.loading;
   const c = track.corners.find(cc => cc.id === sh.corner);
   veh.reset(track.wrapS(c.s + sh.car), 0.5, { speed: 0 });
