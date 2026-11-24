@@ -1,0 +1,273 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Monaco TT">
+<meta name="theme-color" content="#0b1220">
+<meta name="description" content="Monaco time trial: drive a 2024 RB20 around the Circuit de Monaco on your phone.">
+<title>Monaco Time Trial</title>
+<link rel="manifest" href="./manifest.webmanifest">
+<link rel="apple-touch-icon" href="./icons/icon-180.png">
+<link rel="icon" type="image/png" href="./icons/icon-192.png">
+<link rel="preload" as="image" href="./assets/loading.webp">
+<style>
+:root {
+  --navy: #0e1730; --navy2: #16213f; --red: #e2202e; --yellow: #ffc20e;
+  --ink: #f4f6fb; --muted: #9fb0cf; --glass: rgba(10, 16, 32, 0.62);
+  --sa-l: env(safe-area-inset-left, 0px); --sa-r: env(safe-area-inset-right, 0px);
+  --sa-t: env(safe-area-inset-top, 0px); --sa-b: env(safe-area-inset-bottom, 0px);
+  --edge: 22px;            /* keep touch targets away from the screen edges */
+}
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+html, body {
+  margin: 0; width: 100%; height: 100%; overflow: hidden; background: #0b1220; color: var(--ink);
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  -webkit-user-select: none; user-select: none; -webkit-touch-callout: none;
+  overscroll-behavior: none; touch-action: none; position: fixed; inset: 0;
+}
+#app { position: fixed; inset: 0; }
+canvas#view { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
+.layer { position: absolute; inset: 0; display: none; }
+.layer.on { display: block; }
+button { font: inherit; color: inherit; border: 0; background: none; cursor: pointer; touch-action: manipulation; }
+
+/* ---------- loading ---------- */
+#loading { background: #0b1220 url("./assets/loading.webp") center / cover no-repeat; z-index: 40; }
+#loading::after { content: ""; position: absolute; inset: 0; background: linear-gradient(180deg, rgba(8,12,24,0.15) 0%, rgba(8,12,24,0.0) 45%, rgba(8,12,24,0.78) 100%); }
+#loadBox { position: absolute; z-index: 2; left: calc(var(--sa-l) + 28px); right: calc(var(--sa-r) + 28px); bottom: calc(var(--sa-b) + 22px); display: flex; align-items: flex-end; gap: 18px; }
+#loadCorner { width: min(34vw, 280px); aspect-ratio: 16 / 9; border-radius: 10px; background: #1a2440 center / cover; box-shadow: 0 8px 24px rgba(0,0,0,0.45); border: 1px solid rgba(255,255,255,0.18); flex: none; }
+#loadInfo { flex: 1; min-width: 0; }
+#loadTitle { font-size: clamp(22px, 4.2vw, 40px); font-weight: 800; letter-spacing: 0.02em; text-shadow: 0 2px 10px rgba(0,0,0,0.6); }
+#loadCornerName { font-size: 15px; color: var(--yellow); font-weight: 700; margin-top: 4px; letter-spacing: 0.04em; text-transform: uppercase; }
+#loadMap { width: 120px; height: 120px; flex: none; }
+#loadBarWrap { height: 6px; background: rgba(255,255,255,0.18); border-radius: 3px; overflow: hidden; margin-top: 12px; }
+#loadBar { height: 100%; width: 0%; background: linear-gradient(90deg, var(--red), var(--yellow)); transition: width 0.25s ease-out; }
+#loadPct { font-size: 13px; color: var(--muted); margin-top: 6px; }
+
+/* ---------- menu ---------- */
+#menu { z-index: 30; background: linear-gradient(90deg, rgba(6,10,22,0.72) 0%, rgba(6,10,22,0.25) 42%, rgba(6,10,22,0) 70%); }
+#menuInner { position: absolute; left: calc(var(--sa-l) + 34px); top: calc(var(--sa-t) + 26px); bottom: calc(var(--sa-b) + 24px); display: flex; flex-direction: column; justify-content: center; gap: 14px; width: min(46vw, 420px); }
+#menu h1 { margin: 0; font-size: clamp(30px, 6vw, 56px); font-weight: 900; letter-spacing: 0.03em; line-height: 0.95; text-shadow: 0 3px 14px rgba(0,0,0,0.5); }
+#menu h1 span { display: block; font-size: 0.36em; letter-spacing: 0.22em; color: var(--yellow); font-weight: 800; margin-top: 8px; }
+#menuBest { color: var(--muted); font-size: 15px; min-height: 1.2em; }
+.big { display: block; width: 100%; padding: 18px 22px; border-radius: 14px; font-size: 22px; font-weight: 800; letter-spacing: 0.04em; text-align: left; background: var(--glass); border: 1px solid rgba(255,255,255,0.14); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); }
+.big.primary { background: linear-gradient(90deg, #d71f2d, #b0141f); border-color: rgba(255,255,255,0.25); box-shadow: 0 6px 20px rgba(210,30,45,0.35); }
+.big:active { transform: scale(0.98); }
+#cineLabel { position: absolute; right: calc(var(--sa-r) + 30px); bottom: calc(var(--sa-b) + 22px); text-align: right; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; font-size: 14px; color: rgba(255,255,255,0.85); text-shadow: 0 2px 8px rgba(0,0,0,0.6); transition: opacity 0.6s; }
+#cineLabel small { display: block; color: var(--yellow); font-size: 11px; letter-spacing: 0.2em; }
+
+/* ---------- panels (settings / pause / crash) ---------- */
+.panel { position: absolute; inset: 0; z-index: 50; background: rgba(4,8,18,0.62); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); display: none; align-items: center; justify-content: center; }
+.panel.on { display: flex; }
+.card { width: min(560px, calc(100vw - 2 * (var(--edge) + 20px))); max-height: calc(100% - var(--sa-t) - var(--sa-b) - 24px); overflow-y: auto; touch-action: pan-y; background: rgba(14,22,44,0.94); border: 1px solid rgba(255,255,255,0.12); border-radius: 18px; padding: 20px 22px; box-shadow: 0 20px 60px rgba(0,0,0,0.5); }
+.card h2 { margin: 0 0 12px; font-size: 22px; font-weight: 900; letter-spacing: 0.03em; }
+.card .sub { color: var(--muted); font-size: 14px; margin: -6px 0 14px; }
+.btnRow { display: grid; gap: 10px; grid-template-columns: 1fr 1fr; }
+.btn { padding: 15px 14px; border-radius: 12px; font-size: 17px; font-weight: 800; background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.14); text-align: center; }
+.btn.primary { background: linear-gradient(90deg, #d71f2d, #b0141f); }
+.btn.full { grid-column: 1 / -1; }
+.btn:active { transform: scale(0.98); }
+.row { display: grid; grid-template-columns: 150px 1fr 44px; align-items: center; gap: 10px; padding: 9px 0; border-bottom: 1px solid rgba(255,255,255,0.06); font-size: 15px; }
+.row output { text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
+.row input[type=range] { width: 100%; height: 34px; accent-color: var(--red); touch-action: pan-x; }
+.seg { display: flex; gap: 6px; grid-column: 2 / 4; }
+.seg button { flex: 1; padding: 9px 4px; border-radius: 9px; background: rgba(255,255,255,0.07); border: 1px solid rgba(255,255,255,0.1); font-size: 14px; font-weight: 700; }
+.seg button.on { background: rgba(226,32,46,0.85); border-color: rgba(255,255,255,0.3); }
+#crashMsg { color: #ffd2d6; }
+
+/* ---------- HUD ---------- */
+#hud { z-index: 20; pointer-events: none; }
+#hudTop { position: absolute; top: calc(var(--sa-t) + 10px); left: calc(var(--sa-l) + var(--edge)); right: calc(var(--sa-r) + var(--edge)); display: flex; justify-content: space-between; align-items: flex-start; }
+#times { background: var(--glass); border-radius: 12px; padding: 7px 12px; min-width: 168px; font-variant-numeric: tabular-nums; }
+#times .cur { font-size: 24px; font-weight: 800; letter-spacing: 0.01em; }
+#times .cur.invalid { color: #ff8a93; text-decoration: line-through; text-decoration-thickness: 2px; }
+#times .lbl { color: var(--muted); font-size: 11px; font-weight: 700; letter-spacing: 0.1em; margin-right: 6px; }
+#times .line { font-size: 14px; font-weight: 700; line-height: 1.35; }
+#times .lapno { font-size: 12px; color: var(--muted); font-weight: 700; letter-spacing: 0.06em; }
+#hudBtns { display: flex; gap: 12px; pointer-events: auto; }
+.hbtn { width: 50px; height: 50px; border-radius: 14px; background: var(--glass); border: 1px solid rgba(255,255,255,0.16); display: flex; align-items: center; justify-content: center; }
+.hbtn svg { width: 24px; height: 24px; fill: #fff; }
+#camLabel { position: absolute; top: calc(var(--sa-t) + 66px); right: calc(var(--sa-r) + var(--edge)); font-size: 12px; font-weight: 800; letter-spacing: 0.12em; color: rgba(255,255,255,0.85); background: var(--glass); border-radius: 8px; padding: 4px 8px; opacity: 0; transition: opacity 0.4s; }
+#msg { position: absolute; top: calc(var(--sa-t) + 14px); left: 50%; transform: translateX(-50%); text-align: center; pointer-events: none; }
+#msg .m { display: inline-block; background: rgba(10,16,32,0.75); border-radius: 12px; padding: 8px 16px; font-weight: 800; font-size: 17px; margin-bottom: 6px; opacity: 0; transition: opacity 0.25s; white-space: nowrap; }
+#msg .m.on { opacity: 1; }
+#msg .m.bad { background: rgba(170,18,30,0.88); }
+#msg .m.good { background: rgba(18,120,60,0.88); }
+#msg .m.best { background: linear-gradient(90deg, #7c3aed, #a855f7); }
+#dash { position: absolute; left: 50%; transform: translateX(-50%); bottom: calc(var(--sa-b) + 12px); display: flex; align-items: center; gap: 12px; background: var(--glass); border-radius: 14px; padding: 6px 14px 6px 12px; }
+#gear { font-size: 40px; font-weight: 900; width: 34px; text-align: center; line-height: 1; }
+#speed { font-size: 30px; font-weight: 800; font-variant-numeric: tabular-nums; min-width: 66px; text-align: right; line-height: 1; }
+#speedU { font-size: 11px; color: var(--muted); font-weight: 700; letter-spacing: 0.1em; }
+#revs { display: flex; gap: 3px; margin-top: 5px; }
+#revs i { width: 9px; height: 6px; border-radius: 2px; background: rgba(255,255,255,0.15); }
+#revs i.g { background: #29d36a; } #revs i.r { background: #ff3040; } #revs i.b { background: #3b82f6; }
+#revs.flash i { background: #3b82f6 !important; }
+#dmg { width: 34px; height: 58px; }
+#dmg .p { fill: rgba(255,255,255,0.22); transition: fill 0.3s; }
+#dmg .p.d1 { fill: #ffb020; } #dmg .p.d2 { fill: #ff3040; }
+
+/* ---------- touch controls ---------- */
+#controls { z-index: 15; }
+#steerZone { position: absolute; left: calc(var(--sa-l) + var(--edge)); bottom: calc(var(--sa-b) + 18px); width: min(42vw, 400px); height: min(46vh, 210px); border-radius: 22px; background: rgba(255,255,255,0.035); border: 1px solid rgba(255,255,255,0.07); touch-action: none; }
+#steerTrack { position: absolute; left: 16px; right: 16px; top: 50%; height: 4px; margin-top: -2px; border-radius: 2px; background: rgba(255,255,255,0.12); }
+#steerKnob { position: absolute; top: 50%; left: 50%; width: 58px; height: 58px; margin: -29px 0 0 -29px; border-radius: 50%; background: rgba(255,255,255,0.14); border: 2px solid rgba(255,255,255,0.35); will-change: transform; }
+#steerHint { position: absolute; bottom: 8px; left: 0; right: 0; text-align: center; font-size: 11px; font-weight: 700; color: rgba(255,255,255,0.35); letter-spacing: 0.12em; }
+#pedals { position: absolute; right: calc(var(--sa-r) + var(--edge)); bottom: calc(var(--sa-b) + 18px); display: flex; gap: 14px; align-items: flex-end; }
+.pedal { position: relative; width: min(13vw, 108px); height: min(52vh, 230px); border-radius: 20px; background: rgba(255,255,255,0.06); border: 2px solid rgba(255,255,255,0.18); overflow: hidden; touch-action: none; }
+.pedal .fill { position: absolute; left: 0; right: 0; bottom: 0; height: 0%; will-change: height; }
+#brake .fill { background: linear-gradient(0deg, rgba(255,48,64,0.75), rgba(255,48,64,0.35)); }
+#throttle .fill { background: linear-gradient(0deg, rgba(41,211,106,0.75), rgba(41,211,106,0.35)); }
+.pedal .lab { position: absolute; left: 0; right: 0; bottom: 12px; text-align: center; font-weight: 900; font-size: 13px; letter-spacing: 0.1em; color: rgba(255,255,255,0.8); }
+.pedal.on { border-color: rgba(255,255,255,0.6); }
+
+/* ---------- misc ---------- */
+#rotate { position: fixed; inset: 0; z-index: 100; background: #0b1220; display: none; align-items: center; justify-content: center; flex-direction: column; gap: 18px; text-align: center; padding: 30px; }
+#rotate svg { width: 84px; height: 84px; fill: none; stroke: #fff; stroke-width: 2.5; animation: rot 2.4s ease-in-out infinite; }
+@keyframes rot { 0%, 30% { transform: rotate(0deg); } 60%, 100% { transform: rotate(-90deg); } }
+#rotate p { font-size: 22px; font-weight: 800; margin: 0; }
+#rotate small { color: var(--muted); font-size: 15px; }
+@media (orientation: portrait) { #rotate { display: flex; } }
+#tapAudio { position: absolute; left: 50%; top: 58%; transform: translate(-50%, -50%); z-index: 25; padding: 10px 16px; border-radius: 12px; background: var(--glass); font-weight: 700; font-size: 14px; display: none; pointer-events: none; }
+#flash { position: absolute; inset: 0; z-index: 18; pointer-events: none; background: #fff; opacity: 0; }
+#err { position: fixed; left: 10px; right: 10px; bottom: 10px; z-index: 200; background: #5a0d14; color: #fff; padding: 10px 14px; border-radius: 10px; font: 13px/1.4 ui-monospace, Menlo, monospace; display: none; white-space: pre-wrap; }
+#fps { position: absolute; left: calc(var(--sa-l) + 6px); top: calc(var(--sa-t) + 4px); font: 11px ui-monospace, Menlo, monospace; color: #9f9; z-index: 60; display: none; pointer-events: none; text-shadow: 0 1px 2px #000; }
+</style>
+</head>
+<body>
+<div id="app">
+  <canvas id="view" aria-label="Monaco 3D view"></canvas>
+
+  <div id="loading" class="layer on">
+    <div id="loadBox">
+      <div id="loadCorner"></div>
+      <div id="loadInfo">
+        <div id="loadTitle">Circuit de Monaco</div>
+        <div id="loadCornerName">Sainte Dévote · T1</div>
+        <div id="loadBarWrap"><div id="loadBar"></div></div>
+        <div id="loadPct">Loading… 0%</div>
+      </div>
+      <svg id="loadMap" viewBox="0 0 100 100" aria-hidden="true"></svg>
+    </div>
+  </div>
+
+  <div id="menu" class="layer">
+    <div id="menuInner">
+      <h1>MONACO<span>TIME TRIAL · RB20</span></h1>
+      <div id="menuBest"></div>
+      <button class="big primary" id="btnDrive">Drive</button>
+      <button class="big" id="btnSettings">Settings</button>
+    </div>
+    <div id="cineLabel"></div>
+  </div>
+
+  <div id="hud" class="layer">
+    <div id="hudTop">
+      <div id="times">
+        <div class="lapno" id="lapNo">OUT LAP</div>
+        <div class="cur" id="tCur">–:––.–––</div>
+        <div class="line"><span class="lbl">LAST</span><span id="tLast">–:––.–––</span></div>
+        <div class="line"><span class="lbl">BEST</span><span id="tBest">–:––.–––</span></div>
+      </div>
+      <div id="hudBtns">
+        <button class="hbtn" id="btnCam" aria-label="Change camera"><svg viewBox="0 0 24 24"><path d="M4 7h3l2-2.5h6L17 7h3a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V8a1 1 0 0 1 1-1zm8 3a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7z"/></svg></button>
+        <button class="hbtn" id="btnPause" aria-label="Pause"><svg viewBox="0 0 24 24"><path d="M7 5h3.5v14H7zM13.5 5H17v14h-3.5z"/></svg></button>
+      </div>
+    </div>
+    <div id="camLabel">T-CAM</div>
+    <div id="msg"><div class="m" id="msg1"></div><br><div class="m" id="msg2"></div></div>
+    <div id="dash">
+      <svg id="dmg" viewBox="0 0 34 58" aria-hidden="true">
+        <rect class="p" id="dm-fwL" x="2" y="2" width="14" height="5" rx="1"/>
+        <rect class="p" id="dm-fwR" x="18" y="2" width="14" height="5" rx="1"/>
+        <rect class="p" id="dm-nose" x="14" y="8" width="6" height="10" rx="2"/>
+        <rect class="p" id="dm-wheelFL" x="3" y="12" width="7" height="11" rx="2"/>
+        <rect class="p" id="dm-wheelFR" x="24" y="12" width="7" height="11" rx="2"/>
+        <rect class="p" id="dm-body" x="12" y="19" width="10" height="22" rx="3"/>
+        <rect class="p" id="dm-wheelRL" x="2" y="38" width="8" height="12" rx="2"/>
+        <rect class="p" id="dm-wheelRR" x="24" y="38" width="8" height="12" rx="2"/>
+        <rect class="p" id="dm-rw" x="7" y="51" width="20" height="5" rx="1"/>
+      </svg>
+      <div><div id="gear">N</div></div>
+      <div><div id="speed">0</div><div id="speedU">KM/H</div><div id="revs"></div></div>
+    </div>
+    <div id="tapAudio">Tap to enable sound</div>
+  </div>
+
+  <div id="controls" class="layer">
+    <div id="steerZone"><div id="steerTrack"></div><div id="steerKnob"></div><div id="steerHint">STEER</div></div>
+    <div id="pedals">
+      <div class="pedal" id="brake"><div class="fill"></div><div class="lab">BRAKE</div></div>
+      <div class="pedal" id="throttle"><div class="fill"></div><div class="lab">THROTTLE</div></div>
+    </div>
+  </div>
+  <div id="flash"></div>
+
+  <div id="pause" class="panel">
+    <div class="card">
+      <h2>Paused</h2>
+      <div class="sub" id="pauseSub">The lap timer is frozen.</div>
+      <div class="btnRow">
+        <button class="btn primary full" id="btnResume">Resume</button>
+        <button class="btn" id="btnRestart">Quick Restart</button>
+        <button class="btn" id="btnReset">Reset Car</button>
+        <button class="btn" id="btnPauseSettings">Settings</button>
+        <button class="btn" id="btnMenu">Return to Menu</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="crash" class="panel">
+    <div class="card">
+      <h2>Car undriveable</h2>
+      <div class="sub" id="crashMsg">Heavy impact.</div>
+      <div class="btnRow">
+        <button class="btn primary full" id="btnCrashRestart">Quick Restart</button>
+        <button class="btn full" id="btnCrashMenu">Return to Menu</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="settings" class="panel">
+    <div class="card">
+      <h2>Settings</h2>
+      <div class="row"><span>Steering sensitivity</span><input type="range" id="sSteer" min="0.5" max="1.8" step="0.05"><output id="oSteer"></output></div>
+      <div class="row"><span>Master volume</span><input type="range" id="sVol" min="0" max="1" step="0.05"><output id="oVol"></output></div>
+      <div class="row"><span>Engine volume</span><input type="range" id="sEng" min="0" max="1" step="0.05"><output id="oEng"></output></div>
+      <div class="row"><span>Effects volume</span><input type="range" id="sFx" min="0" max="1" step="0.05"><output id="oFx"></output></div>
+      <div class="row"><span>Camera</span><div class="seg" id="segCam"><button data-v="tcam">T-Cam</button><button data-v="cockpit">Cockpit</button><button data-v="chase">Chase</button></div></div>
+      <div class="row"><span>Graphics</span><div class="seg" id="segGfx"><button data-v="auto">Auto</button><button data-v="high">High</button><button data-v="medium">Medium</button><button data-v="low">Low</button></div></div>
+      <div class="row"><span>Driving assists</span><div class="seg" id="segAssist"><button data-v="standard">Standard</button><button data-v="off">Off</button></div></div>
+      <div class="row"><span>Show FPS</span><div class="seg" id="segFps"><button data-v="0">Off</button><button data-v="1">On</button></div></div>
+      <div class="btnRow" style="margin-top:14px">
+        <button class="btn" id="btnClearBest">Clear best lap</button>
+        <button class="btn primary" id="btnSettingsBack">Done</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="fps"></div>
+</div>
+<div id="rotate">
+  <svg viewBox="0 0 64 64"><rect x="20" y="6" width="24" height="44" rx="5"/><circle cx="32" cy="43" r="2"/><path d="M50 20c6 4 8 10 7 16M57 36l-4-3M57 36l3-4"/></svg>
+  <p>Rotate your phone to play.</p>
+  <small>Monaco Time Trial is played in landscape with two thumbs.</small>
+</div>
+<div id="err"></div>
+<script>
+  // Surface fatal errors on the phone screen instead of failing silently.
+  window.addEventListener('error', (e) => { const el = document.getElementById('err'); el.style.display = 'block'; el.textContent = 'Error: ' + (e.message || e.error); });
+  window.addEventListener('unhandledrejection', (e) => { const el = document.getElementById('err'); el.style.display = 'block'; el.textContent = 'Error: ' + (e.reason && e.reason.message || e.reason); });
+  // Block pinch-zoom / double-tap / page gestures on iOS Safari.
+  ['gesturestart', 'gesturechange', 'gestureend'].forEach(t => document.addEventListener(t, e => e.preventDefault(), { passive: false }));
+  document.addEventListener('touchmove', (e) => { if (!e.target.closest || !e.target.closest('.card')) e.preventDefault(); }, { passive: false });
+  document.addEventListener('dblclick', (e) => e.preventDefault(), { passive: false });
+  document.addEventListener('contextmenu', (e) => e.preventDefault());
+</script>
+<script type="importmap">{"imports":{"three":"./vendor/three/three.module.min.js","three/addons/":"./vendor/three/addons/"}}</script>
+<script type="module" src="./js/main.js"></script>
+</body>
+</html>
