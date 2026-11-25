@@ -78,8 +78,12 @@ export class Controls {
     if (t.identifier === this.steerTouch) {
       const w = this.zone.getBoundingClientRect().width;
       const full = w * 0.34 / Math.max(0.3, settings.steerSens);    // px for full lock
-      this.steerRaw = Math.max(-1, Math.min(1, (x - this.steerStartX) / full));
-      this._knob(this.steerRaw);
+      const raw = Math.max(-1, Math.min(1, (x - this.steerStartX) / full));
+      // a resting thumb jitters by a pixel or two: small rest deadzone, rescaled so the
+      // response stays continuous outside it
+      const DZ = 0.035;
+      this.steerRaw = Math.abs(raw) <= DZ ? 0 : Math.sign(raw) * (Math.abs(raw) - DZ) / (1 - DZ);
+      this._knob(raw);
       return;
     }
     const pt = this.pedalTouches.get(t.identifier);
@@ -119,6 +123,8 @@ export class Controls {
     // touch steering follows the thumb closely; release / keys recentre with a short time constant
     const tc = this.steerTouch !== null ? 0.035 : 0.09;
     this.steer += (target - this.steer) * Math.min(1, dt / tc);
+    // neutral is exactly zero: no residual steering left over from the exponential return
+    if (target === 0 && Math.abs(this.steer) < 0.004) this.steer = 0;
     let th = 0, br = 0;
     for (const v of this.pedalTouches.values()) {
       if (v.pedal === 'throttle') th = Math.max(th, v.value);

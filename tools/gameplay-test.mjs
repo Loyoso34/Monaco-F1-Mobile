@@ -66,6 +66,28 @@ await touch('touchEnd', []);
 await wait(300);
 c = await ev(() => { const k = window.__app.controls; return { steer: k.steer, thr: k.throttle, brk: k.brake }; });
 check('Released steering recentres smoothly', Math.abs(c.steer) < 0.05 && c.thr === 0 && c.brk === 0, `steer ${c.steer.toFixed(3)}`);
+await wait(400);
+c = await ev(() => { const a = window.__app; return { steer: a.controls.steer, raw: a.controls.steerRaw, delta: a.veh.delta }; });
+check('Neutral steering returns to exactly zero', c.steer === 0 && c.raw === 0 && c.delta === 0, `steer ${c.steer}, road-wheel angle ${c.delta}`);
+// a thumb resting on the steering zone with small tremor (inside the dead zone) steers nothing
+{
+  const full = await ev(() => document.getElementById('steerZone').getBoundingClientRect().width * 0.34);
+  await touch('touchStart', [{ x: sx, y: sy, id: 3 }]);
+  for (const dx of [0.012, -0.02, 0.025, -0.01, 0.03, 0]) { await touch('touchMove', [{ x: sx + dx * full, y: sy + 2, id: 3 }]); await wait(60); }
+  const r = await ev(() => { const k = window.__app.controls; return { steer: k.steer, raw: k.steerRaw }; });
+  await touch('touchEnd', []);
+  check('Resting thumb tremor on the steering zone gives exactly zero steering', r.steer === 0 && r.raw === 0, `steer ${r.steer}, raw ${r.raw}`);
+}
+// throttle only, no steering touch: zero steering throughout and the car does not yaw
+{
+  await ev(() => { const a = window.__app; a.__hd = { psi0: a.veh.psi, maxSteer: 0, maxDelta: 0, maxR: 0 }; a.__hdT = setInterval(() => { const h = a.__hd; h.maxSteer = Math.max(h.maxSteer, Math.abs(a.controls.steer)); h.maxDelta = Math.max(h.maxDelta, Math.abs(a.veh.delta)); h.maxR = Math.max(h.maxR, Math.abs(a.veh.r)); }, 10); });
+  await touch('touchStart', [{ x: tx, y: ty, id: 4 }]);
+  await wait(1500);
+  const r = await ev(() => { const a = window.__app; clearInterval(a.__hdT); return { ...a.__hd, dpsi: a.veh.psi - a.__hd.psi0, v: a.veh.speed * 3.6, contact: a.veh.contact.active }; });
+  await touch('touchEnd', []);
+  check('Throttle only: zero steering, the car holds its heading (no drift)', r.maxSteer === 0 && r.maxDelta === 0 && Math.abs(r.dpsi) < 0.0005 && r.maxR < 0.001 && !r.contact && r.v > 40,
+    `${r.v.toFixed(0)} km/h after 1.5 s, steer ${r.maxSteer}, heading change ${(r.dpsi * 57.3).toFixed(4)}°, max yaw rate ${(r.maxR * 57.3).toFixed(4)}°/s`);
+}
 const prevented = await ev(() => { const e = new TouchEvent('touchmove', { cancelable: true, bubbles: true, touches: [] }); document.getElementById('view').dispatchEvent(e); return e.defaultPrevented; });
 check('Page gestures prevented on the driving surface', prevented);
 

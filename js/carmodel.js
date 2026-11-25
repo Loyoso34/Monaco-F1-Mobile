@@ -473,29 +473,145 @@ export function createCar({ quality = 'high', debugColors = false } = {}) {
   }
 
   // =============================================================================================
-  // HALO (titanium hoop + aero fairing, central pillar, mounts)
+  // HALO: titanium structure (49 mm tube) under a carbon aero fairing. The hoop has a teardrop
+  // aerofoil section (~100 x 48 mm over the top, leading edge facing out / forward, tail towards
+  // the cockpit) that narrows to the faired tube on the rear legs and flares into the mounts;
+  // the central pillar is an aerofoil blade (chord along the flow) that blends into the hoop.
   {
-    const hoopR = [
-      [0.392, 0.600, 1.700], [0.400, 0.700, 1.662], [0.404, 0.763, 1.585], [0.396, 0.786, 1.460],
-      [0.364, 0.797, 1.300], [0.296, 0.802, 1.150], [0.188, 0.805, 1.022], [0.082, 0.806, 0.958], [0, 0.806, SPEC.haloApexFA],
-    ];
-    const pts = [];
-    for (let i = 0; i < hoopR.length; i++) pts.push(new THREE.Vector3(-hoopR[i][0], hoopR[i][1], q(hoopR[i][2])));
-    for (let i = hoopR.length - 2; i >= 0; i--) pts.push(new THREE.Vector3(hoopR[i][0], hoopR[i][1], q(hoopR[i][2])));
-    const curve = new THREE.CatmullRomCurve3(pts, false, 'centripetal');
-    const dense = curve.getSpacedPoints(70);
-    const hoop = sweep(dense, { rx: 0.034, ry: 0.0255, seg: 14 });
     const haloG = group(chassis, 'halo');
-    add(haloG, hoop, M.navy, 'haloHoop');
-    // red/white accent on the top of the hoop front (thin)
-    // central pillar (blade): apex -> chassis mount ahead of the cockpit
-    const pil = sweep([[0, 0.795, q(0.948)], [0, 0.74, q(0.88)], [0, 0.66, q(0.80)], [0, 0.598, q(0.735)]], { rx: 0.024, ry: 0.034, seg: 10 });
-    add(haloG, pil, M.navy, 'haloPillar');
-    const foot = new THREE.BoxGeometry(0.06, 0.03, 0.10); foot.translate(0, 0.598, q(0.73));
-    add(haloG, foot, M.navy, 'haloFoot');
+    const haloMat = hi
+      ? new THREE.MeshPhysicalMaterial({
+        // dark woven carbon under a satin lacquer: soft, diffused reflections (no chrome look
+        // at the grazing T-cam angle)
+        color: 0xc4ccf0, map: tex.carbon.map, normalMap: tex.carbon.normal, normalScale: new THREE.Vector2(0.16, 0.16),
+        roughness: 0.55, metalness: 0.0, specularIntensity: 0.5, clearcoat: 0.55, clearcoatRoughness: 0.22, envMapIntensity: 0.45,
+      })
+      : new THREE.MeshStandardMaterial({ color: 0xc4ccf0, map: tex.carbon.map, roughness: 0.45, metalness: 0.0, envMapIntensity: 0.45 });
+    // closed teardrop / aerofoil outline (NACA 4-digit thickness form, cosine spacing),
+    // x 0 = leading edge .. 1 = trailing edge, returns [[x, y], ...] in chord units
+    const foil = (tc, n) => {
+      const yt = (x) => 5 * tc * (0.2969 * Math.sqrt(x) - 0.1260 * x - 0.3516 * x * x + 0.2843 * x ** 3 - 0.1036 * x ** 4);
+      const up = [], lo = [];
+      for (let i = 0; i <= n; i++) { const x = (1 - Math.cos(Math.PI * i / n)) / 2; up.push([x, yt(x)]); lo.push([x, -yt(x)]); }
+      // loop: TE -> upper -> LE -> lower -> (TE)
+      return [...up.reverse(), ...lo.slice(1, -1)];
+    };
+    const NF = hi ? 9 : 6;
+    // Sweep a varying aerofoil along a path. section(t) -> { c, th, lead: +1/-1 (which way of
+    // the in-plane axis the leading edge faces), axis: 'B' | 'N' (chord direction), droop }
+    const aeroSweep = (pts, section, tile = 0.035) => {
+      const n = pts.length, T = [], N = [], B = [];
+      const up = new THREE.Vector3(0, 1, 0);
+      for (let i = 0; i < n; i++) {
+        const t = new THREE.Vector3().subVectors(pts[Math.min(n - 1, i + 1)], pts[Math.max(0, i - 1)]).normalize();
+        const nn = up.clone().addScaledVector(t, -up.dot(t)).normalize();
+        T.push(t); N.push(nn); B.push(new THREE.Vector3().crossVectors(t, nn).normalize());
+      }
+      const pos = [], uv = [], idx = [];
+      let arc = 0, M = 0;
+      for (let i = 0; i < n; i++) {
+        if (i > 0) arc += pts[i].distanceTo(pts[i - 1]);
+        const sec = section(i / (n - 1));
+        const tc = Math.min(0.9, sec.th / sec.c);
+        const prof = foil(tc, NF);
+        M = prof.length;
+        const ca = Math.cos(sec.droop || 0), sa = Math.sin(sec.droop || 0);
+        let per = 0, prev = null;
+        for (const [x, y] of prof) {
+          // chord coordinate centred on the tube, leading edge towards sec.lead
+          let a = (x - 0.38) * sec.c * -sec.lead, b = y * sec.c;
+          const a2 = a * ca - b * sa * -sec.lead, b2 = a * sa * -sec.lead + b * ca;
+          a = a2; b = b2;
+          const chordV = sec.axis === 'N' ? N[i] : B[i], thickV = sec.axis === 'N' ? B[i] : N[i];
+          const v = pts[i].clone().addScaledVector(chordV, a).addScaledVector(thickV, b);
+          if (prev) per += v.distanceTo(prev);
+          prev = v;
+          pos.push(v.x, v.y, v.z); uv.push(arc / tile, per / tile);
+        }
+      }
+      for (let i = 0; i < n - 1; i++) for (let k = 0; k < M; k++) {
+        const a = i * M + k, b = i * M + (k + 1) % M, c = (i + 1) * M + k, d = (i + 1) * M + (k + 1) % M;
+        idx.push(a, c, b, b, c, d);
+      }
+      // end caps (centroid fans)
+      for (const i of [0, n - 1]) {
+        let cx = 0, cy = 0, cz = 0;
+        for (let k = 0; k < M; k++) { cx += pos[(i * M + k) * 3]; cy += pos[(i * M + k) * 3 + 1]; cz += pos[(i * M + k) * 3 + 2]; }
+        const ci = pos.length / 3; pos.push(cx / M, cy / M, cz / M); uv.push(0, 0);
+        for (let k = 0; k < M; k++) { const a = i * M + k, b = i * M + (k + 1) % M; if (i === 0) idx.push(ci, b, a); else idx.push(ci, a, b); }
+      }
+      const g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+      g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+      g.setIndex(idx);
+      // outward winding check on the first ring (the centre of the ring must be behind each face)
+      g.computeVertexNormals();
+      const nrm = g.attributes.normal, P0 = pts[0];
+      let out = 0;
+      for (let k = 0; k < M; k++) {
+        const vx = pos[k * 3] - P0.x, vy = pos[k * 3 + 1] - P0.y, vz = pos[k * 3 + 2] - P0.z;
+        out += vx * nrm.getX(k) + vy * nrm.getY(k) + vz * nrm.getZ(k);
+      }
+      if (out < 0) { const ix = g.index.array; for (let t = 0; t < ix.length; t += 3) { const tmp = ix[t + 1]; ix[t + 1] = ix[t + 2]; ix[t + 2] = tmp; } g.computeVertexNormals(); }
+      return g;
+    };
+    const smooth = (a, b, x) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
+
+    // hoop path: rear left mount -> apex -> rear right mount (car frame, +x right, -z forward)
+    const hoopR = [
+      [0.388, 0.598, 1.712], [0.398, 0.690, 1.672], [0.404, 0.758, 1.598], [0.398, 0.784, 1.470],
+      [0.366, 0.796, 1.305], [0.298, 0.802, 1.152], [0.190, 0.806, 1.022], [0.084, 0.808, 0.958], [0, 0.808, SPEC.haloApexFA],
+    ];
+    const hp = [];
+    for (let i = 0; i < hoopR.length; i++) hp.push(new THREE.Vector3(-hoopR[i][0], hoopR[i][1], q(hoopR[i][2])));
+    for (let i = hoopR.length - 2; i >= 0; i--) hp.push(new THREE.Vector3(hoopR[i][0], hoopR[i][1], q(hoopR[i][2])));
+    const hoopPts = new THREE.CatmullRomCurve3(hp, false, 'centripetal').getSpacedPoints(hi ? 80 : 48);
+    const hoop = aeroSweep(hoopPts, (t) => {
+      const u = Math.min(t, 1 - t) * 2;                  // 0 at the mounts, 1 at the apex
+      const top = smooth(0.10, 0.34, u);                 // faired top / front section
+      const flare = 1 + 0.55 * (1 - smooth(0.0, 0.07, u));
+      return { c: (0.064 + 0.038 * top) * flare, th: 0.048 * (1 + 0.25 * (flare - 1)), lead: -1, axis: 'B', droop: 0.10 * top };
+    });
+    add(haloG, hoop, haloMat, 'haloHoop');
+
+    // central pillar: from inside the hoop at the apex down to the chassis ahead of the cockpit
+    // it rises vertically into the hoop (so its end section sits inside the hoop's aerofoil)
+    // and curves forward / down to the chassis
+    const pilPts = new THREE.CatmullRomCurve3([
+      new THREE.Vector3(0, 0.812, q(0.940)), new THREE.Vector3(0, 0.772, q(0.934)), new THREE.Vector3(0, 0.730, q(0.905)),
+      new THREE.Vector3(0, 0.680, q(0.850)), new THREE.Vector3(0, 0.632, q(0.790)), new THREE.Vector3(0, 0.596, q(0.742)),
+    ], false, 'centripetal').getSpacedPoints(hi ? 24 : 14);
+    const pillar = aeroSweep(pilPts, (t) => {
+      const blend = 1 - smooth(0.0, 0.30, t);            // widens into the hoop at the top (fillet)
+      const foot = smooth(0.78, 1.0, t);                 // and into the mounting pad at the bottom
+      return { c: 0.080 - 0.010 * blend + 0.030 * foot, th: 0.036 + 0.016 * blend + 0.012 * foot, lead: 1, axis: 'N', droop: 0 };
+    });
+    add(haloG, pillar, haloMat, 'haloPillar');
+
+    // mounting pads: streamlined bolted feet on the chassis (front) and on the shoulders (rear)
+    const pad = (cx, cy, cz, len, wid, hgt, yaw = 0) => {
+      const secs = [];
+      const n = 9;
+      for (let i = 0; i <= n; i++) {
+        const f = i / n, z = cz - len / 2 + len * f;
+        const k = Math.sin(Math.PI * Math.min(1, f * 1.25)) ** 0.6;          // blunt front, tapered tail
+        const w = Math.max(0.004, wid / 2 * k), h = Math.max(0.003, hgt * k);
+        const ring = [];
+        for (let j = 0; j < 12; j++) {
+          const a = Math.PI * j / 11;                    // half-ellipse dome over a flat base
+          ring.push([cx + Math.cos(a) * w, cy + Math.sin(a) * h, z]);
+        }
+        secs.push({ z, pts: ring });
+      }
+      const g = loft(secs, { capStart: true, capEnd: true });
+      if (yaw) g.rotateY(yaw);
+      return boxUV(g, 0.05);
+    };
+    add(haloG, pad(0, 0.589, q(0.742), 0.17, 0.105, 0.030), haloMat, 'haloFoot');
     for (const sx of [-1, 1]) {
-      const rf = new THREE.BoxGeometry(0.07, 0.05, 0.12); rf.translate(sx * 0.385, 0.62, q(1.69));
-      add(haloG, rf, M.navy, 'haloRearMount');
+      const rp = pad(0, 0.0, 0, 0.19, 0.095, 0.052);
+      rp.translate(sx * 0.388, 0.574, q(1.712));
+      add(haloG, rp, haloMat, 'haloRearMount');
     }
   }
 

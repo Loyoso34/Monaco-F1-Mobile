@@ -20,7 +20,12 @@ const LAT0 = 43.7375, LON0 = 7.4235, R_EARTH = 6378137;
 // Annotations (raw index i = position in MONACO_RAW, fractional allowed)
 // ---------------------------------------------------------------------------------------------
 export const SF_IDX = 114.2;          // start/finish line on Boulevard Albert 1er
-export const SPAWN_BEFORE_SF = 55;    // m before the line
+// Start position: the second grid slot (front wheels behind its line, 16 m before the start
+// line, right-hand side of the road). The start / finish straight is a long right-hand curve
+// (R ~ 215-1000 m); from here a car held perfectly straight runs ~120 m before reaching the
+// left-hand side, instead of 45 m from the tighter part of the bend further back.
+export const SPAWN_BEFORE_SF = 18.6;  // m before the line (car reference point)
+export const SPAWN_D = -2.4;          // lateral offset (+ = left)
 
 // Named corners. side: direction of the turn. apex idx for markers / loading screen.
 export const CORNERS = [
@@ -489,7 +494,7 @@ export function buildTrack(opts = {}) {
   const track = new Track({
     N, ds, L, px, py, pz, tx, tz, nx, nz, curv, heading, halfW, curbL, curbR, gapL, gapR,
     barL, barR, bank, tunnel, uIdx, corners, cutZones, checkpoints, sectors, curbList,
-    tunnelS: [tunS0, tunS1], spawnS: L - SPAWN_BEFORE_SF, closure: this_closure,
+    tunnelS: [tunS0, tunS1], spawnS: L - SPAWN_BEFORE_SF, spawnD: SPAWN_D, closure: this_closure,
   });
   return track;
 }

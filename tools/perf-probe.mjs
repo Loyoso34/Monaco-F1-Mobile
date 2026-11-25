@@ -14,7 +14,7 @@ page.on('pageerror', e => console.log('err', e.message));
 // 1) draw calls & triangles at points around the lap (rendered, high quality)
 await page.goto('http://localhost:8772/?start=drive&noaudio=1&q=high');
 await page.waitForFunction(() => window.__ready === true, null, { timeout: 120000 });
-const pts = ['spawn', 'ste-devote', 'casino', 'hairpin', 'tunnel', 'chicane', 'tabac', 'pool1', 'rascasse'];
+const pts = ['spawn', 'ste-devote', 'casino', 'hairpin', 'portier', 'tunnel', 'chicane', 'tabac', 'pool1', 'rascasse'];
 const rows = [];
 for (const id of pts) {
   const r = await page.evaluate(async (id) => {
@@ -23,12 +23,17 @@ for (const id of pts) {
     a.veh.reset(s, 0, { speed: 30 }); a.timing.teleport(a.veh.s);
     await new Promise(r => setTimeout(r, 400));
     const i = a.renderer.info.render;
-    return { id, calls: i.calls, tris: i.triangles };
+    const calls = i.calls, tris = i.triangles;
+    // mean frame interval over ~1.5 s (software GL here: only meaningful relative to other builds)
+    const t0 = performance.now(); let n = 0;
+    await new Promise((res) => { const f = () => { n++; if (performance.now() - t0 < 1500) requestAnimationFrame(f); else res(); }; requestAnimationFrame(f); });
+    return { id, calls, tris, frameMs: (performance.now() - t0) / n };
   }, id);
   rows.push(r);
 }
 console.log('draw calls / triangles per frame (T-cam, high quality):');
-for (const r of rows) console.log(`  ${r.id.padEnd(11)} ${String(r.calls).padStart(4)} calls  ${String(r.tris).padStart(7)} tris`);
+for (const r of rows) console.log(`  ${r.id.padEnd(11)} ${String(r.calls).padStart(4)} calls  ${String(r.tris).padStart(7)} tris  ${r.frameMs.toFixed(1).padStart(6)} ms/frame (software GL)`);
+if (process.env.PERF_QUICK) { await b.close(); srv.kill(); process.exit(0); }
 // 2) simulation CPU per frame and memory over laps (no rendering so the sim runs in real time)
 await page.goto('http://localhost:8772/?start=drive&noaudio=1&q=high&autopilot=1&norender=1');
 await page.waitForFunction(() => window.__ready === true, null, { timeout: 120000 });

@@ -57,6 +57,11 @@ else if (view === 'rear') { cam = ortho(2.6); cam.position.set(0, 0.5, 20); cam.
 else if (view === 'top') { cam = ortho(6.2); cam.position.set(0, 20, cz); cam.up.set(1, 0, 0); cam.lookAt(0, 0, cz); }
 else if (view === 'rear34') { cam = new THREE.PerspectiveCamera(30, W / H, 0.05, 100); cam.position.set(4.2, 1.9, Z.RA + 5.0); cam.lookAt(0, 0.45, 0); }
 else if (view === 'front34') { cam = new THREE.PerspectiveCamera(30, W / H, 0.05, 100); cam.position.set(-4.0, 1.6, Z.FA - 5.0); cam.lookAt(0, 0.4, -0.3); }
+else if (view === 'halo34') { cam = new THREE.PerspectiveCamera(26, W / H, 0.05, 100); cam.position.set(-1.55, 1.45, Z.FA + 0.94 - 1.75); cam.lookAt(0, 0.70, Z.FA + 1.28); }
+else if (view === 'haloside') { cam = new THREE.PerspectiveCamera(24, W / H, 0.05, 100); cam.position.set(2.6, 1.05, Z.FA + 1.25); cam.lookAt(0, 0.70, Z.FA + 1.28); }
+else if (view === 'halorear') { cam = new THREE.PerspectiveCamera(30, W / H, 0.05, 100); cam.position.set(1.1, 1.55, Z.FA + 2.9); cam.lookAt(0, 0.74, Z.FA + 1.2); }
+else if (view === 'halofront') { cam = new THREE.PerspectiveCamera(16, W / H, 0.05, 100); cam.position.set(0.35, 1.05, Z.FA + 0.05); cam.lookAt(0, 0.74, Z.FA + 0.95); }
+else if (view === 'pillarback') { cam = new THREE.PerspectiveCamera(14, W / H, 0.02, 100); cam.position.set(0.05, 0.70, Z.FA + 1.55); cam.lookAt(0, 0.76, Z.FA + 0.94); }
 else if (view === 'tcam' || view === 'cockpit') {
   const m = CAMERA_MOUNTS[view];
   const hfov = +(P.get('hfov') || 0);

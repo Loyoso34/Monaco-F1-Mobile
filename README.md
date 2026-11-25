@@ -4,8 +4,7 @@ A mobile-first 3D Formula 1 time trial around the **Circuit de Monaco** in a **2
 Racing RB20** (Monaco high-downforce specification). Landscape, two thumbs, opens straight from a
 link. Static site — no build step; three.js r170 is vendored.
 
-**Play:** https://loyoso34.github.io/Monaco-F1-Mobile/ *(live once GitHub Pages is enabled — see
-[Publishing](#publishing))*
+**Play:** https://loyoso34.github.io/Monaco-F1-Mobile/
 
 ![Default onboard T-cam, approaching Casino Square](docs/img/onboard-tcam-casino.webp)
 
@@ -31,24 +30,18 @@ Your best valid lap is saved on the device.
 
 | Area | Highlights |
 |---|---|
-| **Car** (`js/carspec.js`, `js/carmodel.js`, `js/livery.js`) | Procedural RB20 built from a measured dimension sheet ([docs/CAR_DIMENSIONS.md](docs/CAR_DIMENSIONS.md)): lofted survival cell with real cockpit opening, nose cross-sections, 4-element front wing with endplates, pull-rod/push-rod suspension on real pick-ups, steering about the kingpin, halo with pillar, mirrors, driver, RB20 sidepods with undercut, floor, diffuser, Monaco rear wing + beam wing, soft tyres, livery painted at measured positions. |
+| **Car** (`js/carspec.js`, `js/carmodel.js`, `js/livery.js`) | Procedural RB20 built from a measured dimension sheet ([docs/CAR_DIMENSIONS.md](docs/CAR_DIMENSIONS.md)): lofted survival cell with real cockpit opening, nose cross-sections, 4-element front wing with endplates, pull-rod/push-rod suspension on real pick-ups, steering about the kingpin, carbon aero halo (aerofoil hoop and pillar, faired mounts), mirrors, driver, RB20 sidepods with undercut, floor, diffuser, Monaco rear wing + beam wing, soft tyres, livery painted at measured positions. |
 | **Camera** (`js/cameras.js`) | Broadcast **T-cam on the roll hoop** (1.885 m behind the front axle, 0.985 m high) is the default; driver-eye cockpit and chase cams. Rigidly anchored to the chassis; wide-screen FOV keeps 16:9 proportions. |
 | **Audio** (`js/engine-worklet.js`, `js/audio.js`) | Synthesised V6 turbo-hybrid in an AudioWorklet driven by rpm, load and gear (shift cuts, blips, overrun, MGU-K, turbo), tyre scrub, wind, kerbs, scrapes, impacts and tunnel reverb. See [docs/TRACK_AND_AUDIO.md](docs/TRACK_AND_AUDIO.md). |
-| **Circuit** (`js/track-core.js`, `js/trackmesh.js`, `js/scenery.js`) | Geo-referenced centre line scaled to 3,337 m, 43 m of elevation, kerbs, armco and catch fences, braking boards, pit lane, tunnel, harbour with yachts, grandstands, Casino, Fairmont, the Rock and the Palace. |
+| **Circuit** (`js/track-core.js`, `js/corridor.js`, `js/trackmesh.js`, `js/scenery.js`) | Geo-referenced centre line scaled to 3,337 m, 43 m of elevation, kerbs, armco and catch fences, braking boards, pit lane, harbour with yachts, grandstands, Casino, Fairmont, the Rock and the Palace. A track exclusion corridor keeps every building, the terrain and all props off the circuit (whole-footprint tests, relocation instead of deletion). The tunnel has a continuous slab ceiling, beams, LED luminaire rows, concrete walls and smooth light / exposure transitions. |
 | **Physics** (`js/physics.js`, `js/damage.js`) | 240 Hz planar dynamics, load-sensitive tyres with combined slip, speed-dependent downforce, brake-by-wire with migration, fuel-flow-limited power + ERS, barrier contact with friction at the real extremities, frangible wings/nose/wheels, survival cell. |
 | **Game** (`js/main.js`, `js/controls.js`, `js/timing.js`, `js/hud.js`) | Loading with real progress and corner previews, cinematic menu, HUD, settings, pause on focus loss, portrait prompt, PWA. |
 
 ## Publishing
 
-The repository is **private** (this was the only option available to the session that created
-it). GitHub Pages serves private repositories only on paid plans, so:
-
-1. **Settings → General → Danger Zone → Change visibility → Public** (or keep it private on a
-   plan that includes Pages for private repositories).
-2. **Settings → Pages → Build and deployment → Source: Deploy from a branch → Branch: `main`,
-   folder `/ (root)` → Save.**
-3. After about a minute the game is live at **https://loyoso34.github.io/Monaco-F1-Mobile/**.
-   On iPhone, Share → *Add to Home Screen* gives a full-screen landscape app.
+The game is served by **GitHub Pages** from the `main` branch, folder `/ (root)`, at
+https://loyoso34.github.io/Monaco-F1-Mobile/ — every push to `main` is live about a minute
+later. On iPhone, Share → *Add to Home Screen* gives a full-screen landscape app.
 
 Every path is relative, so the site works from the project sub-path; `.nojekyll` makes Pages
 serve the files as they are. The service worker fetches code network-first, so a normal reload
@@ -58,15 +51,20 @@ picks up new versions.
 
 ```bash
 node tools/serve.mjs 8080             # then open http://localhost:8080
-node tools/gameplay-test.mjs out      # emulated-phone acceptance tests
+node tools/gameplay-test.mjs out      # emulated-phone acceptance tests (36 checks)
+node tools/inspect-circuit.mjs        # nothing on the circuit: terrain + every scenery triangle, all tiers
+node tools/straight-line-test.mjs     # zero-steering straight-line and barrier-brush tests (Node)
+node tools/tunnel-test.mjs out        # tunnel light / exposure transitions + frames
+node tools/views.mjs out all          # inspection screenshots at the problem spots, tunnel, halo
 node tools/sim-lap.mjs 3              # headless physics laps with the test driver
 node tools/track-report.mjs           # circuit geometry report
-node tools/shots.mjs out side,front,top,rear34,tcam   # model validation renders
+node tools/shots.mjs out side,front,top,rear34,tcam,halo34,haloside   # model validation renders
+node tools/perf-probe.mjs             # draw calls, triangles, CPU per frame, memory
 node tools/capture.mjs                # re-render the loading images from the game
 ```
 
-Debug URL parameters: `?start=drive`, `?cam=chase`, `?q=low|medium|high`, `?fps=1`,
-`?autopilot=1`, `?noaudio=1`.
+Debug URL parameters: `?start=drive`, `?cam=chase|cockpit`, `?q=low|medium|high`, `?fps=1`,
+`?autopilot=1`, `?noaudio=1`, `?norender=1`, `?s=<lap metre>` (start position), `?cine=<n>`.
 
 See [docs/TESTING.md](docs/TESTING.md) for the test matrix, performance numbers and what still
 needs a physical-phone check.

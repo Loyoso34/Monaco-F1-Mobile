@@ -86,13 +86,13 @@ async function boot() {
     import('./carmodel.js'), import('./carspec.js'), import('./physics.js'), import('./autopilot.js'),
   ]);
   setProgress(0.40, 'Loading circuit…');
-  const [trackmesh, scenery, cameras, controls, timing, hud, fx, audio, perf, env] = await Promise.all([
-    import('./trackmesh.js'), import('./scenery.js'), import('./cameras.js'), import('./controls.js'), import('./timing.js'),
+  const [trackmesh, scenery, corridor, cameras, controls, timing, hud, fx, audio, perf, env] = await Promise.all([
+    import('./trackmesh.js'), import('./scenery.js'), import('./corridor.js'), import('./cameras.js'), import('./controls.js'), import('./timing.js'),
     import('./hud.js'), import('./fx.js'), import('./audio.js'), import('./perf.js'), import('three/addons/RoomEnvironment.js'),
   ]);
   setProgress(0.48, 'Building circuit…');
   await nextFrame();
-  App = await setup({ carmodel, carspec, physics, autopilot, trackmesh, scenery, cameras, controls, timing, hud, fx, audio, perf, env });
+  App = await setup({ carmodel, carspec, physics, autopilot, trackmesh, scenery, corridor, cameras, controls, timing, hud, fx, audio, perf, env });
 }
 
 async function setup(M) {
@@ -132,11 +132,14 @@ async function setup(M) {
   setProgress(0.52, 'Building circuit…'); await nextFrame();
 
   const racingLine = M.autopilot.buildRacingLine(track);
+  // exclusion corridor around every section of the lap: pavement widths, terrain carving and
+  // the placement of every building / prop are derived from it
+  const corridor = M.corridor.buildCorridor(track);
   setProgress(0.58, 'Building circuit…'); await nextFrame();
-  const tm = M.trackmesh.buildTrackMeshes(track, { racingLine, quality: tierName });
+  const tm = M.trackmesh.buildTrackMeshes(track, { racingLine, quality: tierName, corridor });
   scene.add(tm.group);
   setProgress(0.70, 'Building Monaco…'); await nextFrame();
-  const sc = M.scenery.buildScenery(track, { quality: tierName, renderer });
+  const sc = M.scenery.buildScenery(track, { quality: tierName, renderer, corridor });
   scene.add(sc.root);
   sun.position.copy(sc.sunDir).multiplyScalar(60);
   setProgress(0.82, 'Preparing the RB20…'); await nextFrame();
@@ -161,7 +164,8 @@ async function setup(M) {
 
   const app = {
     THREE, M, renderer, scene, camera, sun, hemi, perf, track, tm, sc, car, veh, rig, controls, timing, hud, fx, audio, auto,
-    state: 'loading', simTime: 0, acc: 0, crashT: 0, exposure: 1, tunnelK: 0, exitFlash: 0,
+    state: 'loading', simTime: 0, acc: 0, crashT: 0, exposure: 1, daylight: 1, lightS: null,
+    lightCols: { sky: new THREE.Color(0xcfe2ff), ground: new THREE.Color(0x6b6356), lamp: new THREE.Color(0xffe2bd), floor: new THREE.Color(0x3a3733) },
     cine: { idx: -1, t: 0 }, lastFrame: performance.now(), fpsShown: settings.showFps || DEBUG.fps,
   };
   return app;
@@ -237,7 +241,7 @@ function quickRestart(app, fromMenu = false) {
   const { veh, car, timing, controls, fx, track } = app;
   const s = DEBUG.s ? +DEBUG.s : track.spawnS;
   veh.assists = settings.assists;
-  veh.reset(s, DEBUG.s ? 0 : 1.6, { keepDamage: false });
+  veh.reset(s, DEBUG.s ? 0 : track.spawnD, { keepDamage: false });
   car.repair();
   fx.clear();
   timing.reset(); timing.teleport(veh.s);
@@ -385,6 +389,12 @@ function frame(app) {
     // keep rendering the frozen scene (cheap) for a stable background
   }
   fx.update(app.state === 'paused' ? 0 : dt);
+  // debug / inspection hook (tools/views.mjs): fixed camera at a given position
+  if (app.freeCam) {
+    const fc = app.freeCam;
+    app.camera.position.set(fc.pos[0], fc.pos[1], fc.pos[2]); app.camera.lookAt(fc.look[0], fc.look[1], fc.look[2]);
+    app.camera.fov = fc.fov || 55; app.camera.near = 0.1; app.camera.updateProjectionMatrix();
+  }
   updateLighting(app, dt);
   app.sc.waterNormal.offset.x += dt * 0.004; app.sc.waterNormal.offset.y += dt * 0.0025;
   const tB = performance.now();
@@ -404,19 +414,36 @@ function stepPhysics(app, dt, timed) {
   if (n >= 14) app.acc = 0;
 }
 
-// Tunnel: darker ambient on the car, exposure opens up inside and briefly over-exposes at the
-// exit (camera auto-exposure lag) before settling back to daylight.
+// Tunnel lighting. daylightAt() is the share of daylight at a point of the lap: 1 in the open,
+// falling smoothly over the first ~18 m inside each portal (daylight spill) to the level of the
+// luminaires. The lights on the car follow the camera position directly (sun, sky, reflections,
+// warm luminaire fill); the exposure adapts with a lag like a broadcast camera or the eye:
+// slower when it has to open up entering the tunnel, faster when it closes down at the exit
+// (so the exit is briefly over-exposed, then settles).
+function daylightAt(track, s) {
+  const [a, b] = track.tunnelS;
+  const edge = Math.min(track.deltaS(a, s), track.deltaS(s, b));   // metres inside the nearest portal
+  const t = Math.max(0, Math.min(1, (edge + 6) / 24));
+  return 1 - t * t * (3 - 2 * t);
+}
 function updateLighting(app, dt) {
-  const { veh, track, sun, hemi, renderer, scene } = app;
-  const inT = (app.state === 'driving' || app.state === 'crashed' || app.state === 'paused') && track.inTunnel(veh.s);
-  const k = app.tunnelK;
-  app.tunnelK += ((inT ? 1 : 0) - k) * Math.min(1, dt * (inT ? 3.5 : 2.2));
-  if (k > 0.5 && !inT) app.exitFlash = 1;
-  app.exitFlash *= Math.exp(-dt * 1.8);
-  const tk = app.tunnelK;
-  hemi.intensity = 0.85 * (1 - 0.78 * tk);
-  scene.environmentIntensity = 0.75 * (1 - 0.8 * tk);
-  renderer.toneMappingExposure = 1.0 + 0.55 * tk + 0.35 * app.exitFlash;
+  const { veh, track, sun, hemi, renderer, scene, camera } = app;
+  const pr = track.project(camera.position.x, camera.position.z, veh.s, app._lp || (app._lp = {}));
+  const sCam = pr.ok && Math.abs(pr.d) < 40 ? pr.s : veh.s;
+  const dl = daylightAt(track, sCam);
+  const tk = 1 - dl;
+  app.daylight = dl;
+  sun.intensity = 2.7 * (0.03 + 0.97 * dl);
+  hemi.intensity = 0.85 * (1 - 0.42 * tk);
+  hemi.color.copy(app.lightCols.sky).lerp(app.lightCols.lamp, tk);
+  hemi.groundColor.copy(app.lightCols.ground).lerp(app.lightCols.floor, tk);
+  scene.environmentIntensity = 0.75 * (1 - 0.6 * tk);
+  const target = 1.0 + 0.32 * tk;            // the tunnel stays a little darker than daylight
+  const jump = app.lightS === null || Math.abs(track.deltaS(app.lightS, sCam)) > 40;
+  if (dt <= 0 || jump) app.exposure = target;                 // camera cut / teleport: no lag
+  else app.exposure += (target - app.exposure) * (1 - Math.exp(-dt / (target > app.exposure ? 0.6 : 0.3)));
+  app.lightS = sCam;
+  renderer.toneMappingExposure = app.exposure;
   // shadow camera follows the car
   const c = app.car.root.position;
   sun.target.position.copy(c);
@@ -549,7 +576,6 @@ function setupShot(app, name) {
   const l = track.pointAt(c.s + sh.look[0], sh.look[1]);
   camera.lookAt(l.x, l.y + sh.look[2], l.z);
   camera.fov = 50; camera.updateProjectionMatrix();
-  if (sh.tunnel) { app.tunnelK = 1; app.renderer.toneMappingExposure = 1.4; }
   updateLighting(app, 0);
   app.renderer.render(app.scene, camera);
   window.__ready = true;

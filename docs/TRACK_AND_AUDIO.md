@@ -42,9 +42,61 @@
 * **Barriers & run-off:** barriers sit 0.55–1.1 m beyond the kerbs except the Ste Dévote and
   Mirabeau escape roads, the Nouvelle Chicane escape road and the pool and Rascasse run-offs.
   Armco with catch fencing, advertising walls, Tecpro at the escape roads, a concrete pit wall
-  and tunnel walls with lamp lines every 6 m.
+  and, in the tunnel, armco in front of concrete walls (see *The tunnel* below).
 * **Timing:** 12 ordered checkpoints, three cut zones (Nouvelle Chicane, both Swimming Pool
   chicanes): the lap is invalid when the car's centre goes more than 0.55 m beyond the kerb.
+
+## Track exclusion corridor and scenery placement
+
+Nothing the player can see may stand on the circuit. `js/corridor.js` rasterises every
+cross-section of the lap into 1.25 m cells up to 36 m beyond the barriers and records, per cell:
+the clearance beyond the nearest barrier of **any** section, the clearance beyond the pavement
+edge, and the lowest road / run-off / pavement surface height. Pavement widths are 4.5 m (13 m on
+the pit side of the start straight), clipped to half the free gap where two sections run close
+together (the hairpin, Mirabeau / Portier), and 0.95 m in the tunnel (wall + shell). The track
+mesh, the scenery and the automated inspection all use this one corridor.
+
+* **Buildings** are tested over their **whole footprint**: every cell the rotated rectangle
+  touches (separating-axis test), not just the centre or the corners, must lie ≥ 0.6 m beyond
+  every pavement. A building that does not fit is **relocated** — pushed away from the road in
+  steps of 2–16 m and, if needed, reduced to 80 % / 62 % — before it is given up; second rows,
+  inland blocks and the old town on the Rock go through the same test. The Casino, Hôtel de
+  Paris, swimming pool, pit garages, grandstands and the Fairmont are reserved first, and no two
+  footprints may overlap (oriented-rectangle test). Bases go 0.6 m below the lowest point of the
+  *rendered* terrain along the whole perimeter, so nothing floats.
+* **Terrain** may not rise above 1.2 m below any road, run-off or pavement surface and may only
+  climb away from it at 1 : 2.2; the limit is min-filtered by the terrain mesh spacing so no
+  terrain triangle can rise through the road between its vertices. Retaining walls close the
+  drop at the outer pavement edges. (The terrain grid now spans whole multiples of its spacing;
+  previously `PlaneGeometry` spaced the vertices 15.94 m apart while the heights were sampled
+  every 16 m, shifting the drawn ground by up to 6 m.)
+* **Fairmont hotel:** one structure that follows the curve of the tunnel, with wings on the
+  ground either side and a roof stepped in 20 m segments. All of its faces lie outside the
+  tunnel cross-section.
+* **Palms:** trunks ≥ 1.2 m beyond any barrier, crowns ≥ 7 m above the road.
+* **Verification:** `node tools/inspect-circuit.mjs` checks the rendered triangles of every
+  scenery object and the terrain against the corridor (see [TESTING.md](TESTING.md)).
+
+## The tunnel
+
+* **Structure** (`js/trackmesh.js`): armco (1.05 m) with a 7 m sponsor board only every 124 m per
+  side, capped back to a light concrete wall 0.35 m behind it; the wall rises to a cable tray at
+  4.6 m and on to the ceiling. Pilasters every 7.5 m carry 0.5 × 0.32 m transverse beams under a
+  **continuous slab ceiling** (5.9 m, 6.05 m at the crown) built as one connected surface that
+  faces the road. Two rows of LED luminaires at ±2.6 m (1.5 m fittings every 2.5 m, between the
+  beams) with a third, central row over the 70 m threshold zone after the entrance. A 0.6 m shell
+  and a roof slab (top 7.6 m) enclose it and cast the shadow that keeps the sun off the car;
+  concrete portal frames finish both ends.
+* **Lighting** is baked per vertex (unlit materials inside): near-uniform LED level, +35 % in the
+  threshold zone, lateral and height fall-off, daylight spilling in over 14 m at each portal.
+* **Transitions** (`js/main.js`): the daylight reaching the camera fades over the first ~18 m
+  inside each portal; sun, sky light and reflections follow it while a warm luminaire fill takes
+  over on the car. The exposure adapts with a lag like a broadcast camera — it opens up over
+  ~2 s entering, and the exit is briefly over-exposed before settling (figures in TESTING.md).
+* **The old black ceiling strip** came from the Fairmont hotel blocks: their undersides (6.0 m)
+  cut through the apex of the arched ceiling (6.05 m), and with the sky light turned down in the
+  tunnel those faces rendered almost black. The hotel no longer has any face inside the tunnel
+  cross-section and the ceiling is a single unlit surface.
 
 ## Audio design
 

@@ -47,7 +47,7 @@ were found; those values are photo measurements or estimates and are marked as s
 | Helmet centre behind the front axle | 1.560 | M | Helmet top 0.79 above ground |
 | Halo apex (front pillar top) behind the front axle | 0.940 | M | Top of hoop 0.805 above ground |
 | Halo rear mounts behind the front axle / half width | 1.700 / 0.395 | M / E | |
-| Halo tube | Ø 0.049 + aero fairing | E | Modelled as a 68 × 51 mm elliptical hoop section |
+| Halo tube | Ø 0.049 + aero fairing | E | Faired hoop modelled as a teardrop aerofoil, 100 × 48 mm over the top (see below) |
 | Airbox inlet (roll hoop front) behind the front axle | 1.790 | M | |
 | Airbox / roll-hoop top | 0.950 | R / M | Height limit 950 mm, matches the photos |
 | **T-cam lens** behind the front axle / height | **1.885 / 0.985** | M | Default camera position |
@@ -114,13 +114,27 @@ above the halo); reductions apply to scenery, fences, shadows and resolution.
   thin trailing edges (0.6 % finite TE); flap gaps of 1–2 cm; tips curl up into the endplates.
 * **Suspension:** aerofoil-section links (chord 35–80 mm, thickness 16–30 mm) between chassis
   pick-ups and ball joints inside the rim; one instanced mesh, updated every frame.
-* **Halo:** hoop section 68 × 51 mm (tube + fairing), central pillar 48 × 68 mm.
+* **Halo:** the 49 mm titanium tube under a carbon aero fairing. The hoop is swept with a
+  teardrop aerofoil section (NACA-type thickness form, leading edge facing out / forward, tail
+  towards the cockpit, 5.7° nose-down): **102 × 48 mm over the top and front**, narrowing to the
+  faired tube on the rear legs (64 × 48 mm) and flaring to ~99 × 55 mm into the mounts. The
+  **central pillar** is an aerofoil blade with its chord along the airflow (78–110 mm chord,
+  36–54 mm thick); it rises vertically into the hoop so its end section sits inside the hoop's
+  aerofoil, with a fillet that widens towards the top, and curves forward onto a streamlined,
+  bolted **mounting pad** on the chassis ahead of the cockpit (170 × 105 mm). The rear legs land
+  on faired shoulder mounts (190 × 95 mm). Material: dark woven carbon (2×2 twill, ~4 mm tows,
+  UVs along the hoop) under a satin lacquer (clear coat 0.55, roughness 0.22) with reduced
+  environment reflection, so it reads as carbon — not chrome — at the grazing T-cam angle.
+  Checked from the T-cam, the cockpit, front, side, three-quarter and rear views
+  (`node tools/shots.mjs out halo34,haloside,halorear,halofront,pillarback,tcam,cockpit`).
+
+  ![Halo](img/rb20-halo34.webp)
 
 ## Livery and materials
 
 Matte navy body (roughness 0.5), red pin-stripes, yellow-to-orange nose tip and airbox with red
 charging-bull silhouettes, sponsor names as plain text at their measured positions and scale
 (they are text approximations, not the real logo artwork), carbon weave (normal-mapped,
-roughness 0.3) on exposed carbon, matte carbon floor, rubber tyres (roughness 0.9) with
+roughness 0.3) on exposed carbon, lacquered carbon halo (clear coat), matte carbon floor, rubber tyres (roughness 0.9) with
 soft-compound red markings, metallic titanium hardware (metalness 0.95), glossy helmet and
 mirror glass. The driver's helmet is a generic design.

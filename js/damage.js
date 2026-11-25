@@ -5,6 +5,11 @@
 import { PARTS } from './carspec.js';
 
 const J_PER_UNIT = 9000;          // energy (J) that removes 1.0 health from a part of strength 1
+// Suspension and wheel assemblies absorb light contacts elastically (tyre sidewall, rim,
+// compliant links): a brush below this energy leaves no permanent damage or misalignment.
+const WHEEL_ELASTIC_J = 3500;
+// Wheel alignment only changes once the corner is visibly damaged (HUD level >= 1).
+const MISALIGN_BELOW = 0.7;
 
 export class Damage {
   constructor() { this.reset(); }
@@ -13,6 +18,7 @@ export class Damage {
     this.health = {};
     for (const k of Object.keys(PARTS)) this.health[k] = 1;
     this.toe = { FL: 0, FR: 0, RL: 0, RR: 0 };       // rad, + = toe-left
+    this.toeDir = {};
     this.camber = { FL: 0, FR: 0, RL: 0, RR: 0 };
     this.broken = new Set();                           // parts that have come off
     this.wheelLost = new Set();
@@ -28,7 +34,9 @@ export class Damage {
     const spec = PARTS[part];
     if (!spec) return { severity: 0, newlyBroken: [] };
     this.maxImpactJ = Math.max(this.maxImpactJ, energy);
-    const dmg = energy / (spec.strength * J_PER_UNIT);
+    const isWheel = part.startsWith('wheel');
+    const effective = isWheel ? Math.max(0, energy - WHEEL_ELASTIC_J) : energy;
+    const dmg = effective / (spec.strength * J_PER_UNIT);
     const before = this.health[part];
     this.health[part] = Math.max(0, before - dmg);
     const newly = [];
@@ -36,13 +44,18 @@ export class Damage {
     if (part === 'nose' && this.health.nose < 0.35) {
       for (const p of ['fwL', 'fwR']) this.health[p] = Math.min(this.health[p], 0.15);
     }
-    // wheels: bend the suspension (toe / camber) in the direction of the impact
-    if (part.startsWith('wheel')) {
+    // wheels: a hard strike bends the suspension (toe / camber) in the direction of the
+    // impact; light brushes stay elastic and leave the alignment untouched
+    if (isWheel && dmg > 0) {
       const id = part.slice(5);
-      const loss = 1 - this.health[part];
-      const dir = Math.sign(vt || 1) * (id.endsWith('L') ? 1 : -1);
-      this.toe[id] = dir * Math.min(0.12, loss * 0.11);            // up to ~7°
-      this.camber[id] = (id.endsWith('L') ? -1 : 1) * Math.min(0.09, loss * 0.08);
+      const bend = Math.max(0, MISALIGN_BELOW - this.health[part]);
+      if (bend > 0) {
+        const dir = Math.sign(vt || 1) * (id.endsWith('L') ? 1 : -1);
+        if (!this.toeDir) this.toeDir = {};
+        if (!this.toeDir[id]) this.toeDir[id] = dir;               // a bent link stays bent the same way
+        this.toe[id] = this.toeDir[id] * Math.min(0.055, bend * 0.09);          // up to ~3°
+        this.camber[id] = (id.endsWith('L') ? -1 : 1) * Math.min(0.06, bend * 0.08);
+      }
     }
     for (const p of Object.keys(this.health)) {
       if (this.health[p] < 0.3 && !this.broken.has(p) && (p.startsWith('fw') || p === 'nose' || p.startsWith('rw') || p.startsWith('wheel'))) {
@@ -55,7 +68,7 @@ export class Damage {
     if (this.wheelLost.size) this._end('Suspension failure – a wheel has come off');
     if (this.health.gearbox < 0.12) this._end('Gearbox and rear crash structure destroyed');
     if (this.health.nose < 0.05 && energy > 60000) this._end('Heavy frontal impact');
-    if (dmg > 0.02) this.version++;
+    if (dmg > 0.005) this.version++;
     const severity = Math.min(1, energy / 60000);
     return { severity, newlyBroken: newly, before, after: this.health[part] };
   }
