@@ -1,9 +1,11 @@
 // Automated acceptance tests in an emulated phone (Chromium + touch emulation).
 // node tools/gameplay-test.mjs <outdir> [iphone|android]
-// Checks: cold launch, two-thumb touch input (incl. throttle->brake slide), automatic shifts,
-// focus loss / resume, lap timing + saved best across a reload, corner-cut detection,
-// reverse crossings, Reset Car, Quick Restart, hairpin full lock, tunnel pull, downshifts into
-// the Nouvelle Chicane, a glancing barrier scrape and a heavy frontal impact.
+// Checks: cold launch + loading screen, two-thumb touch input (incl. throttle->brake slide and
+// the progressive brake pad), steering direction (input -> steering wheel -> front wheels ->
+// yaw), steering-zone size, automatic shifts, focus loss / resume, lap timing + saved best
+// across a reload, corner-cut detection, reverse crossings, Reset Car, Quick Restart, hairpin
+// full lock, tunnel pull, downshifts into the Nouvelle Chicane, a glancing barrier scrape, a
+// heavy frontal impact and the real-time mirrors (rendered page).
 import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
 const { chromium, devices } = require('playwright');
@@ -34,8 +36,13 @@ const touch = (type, points) => cdp.send('Input.dispatchTouchEvent', { type, tou
 const t0 = Date.now();
 await page.goto(root + '?norender=1&noaudio=1');
 const loadingVisible = await page.isVisible('#loading');
+const loadingText = (await page.textContent('#loading')).replace(/\s+/g, ' ');
 await page.waitForFunction(() => window.__ready === true, null, { timeout: 120000 });
 check('Cold launch: loading screen then menu', loadingVisible && await page.isVisible('#menu.on'), `ready in ${((Date.now() - t0) / 1000).toFixed(1)} s (emulated, software GL)`);
+check('Loading screen shows F1-27, MAX VERSTAPPEN, ORACLE RED BULL RACING, MONACO GRAND PRIX, TIME TRIAL',
+  ['F1-27', 'MAX VERSTAPPEN', 'ORACLE RED BULL RACING', 'MONACO GRAND PRIX', 'TIME TRIAL'].every(t => loadingText.includes(t)), loadingText.trim().slice(0, 90));
+await page.waitForFunction(() => !document.getElementById('loading').classList.contains('on') && document.getElementById('menu').classList.contains('in') && getComputedStyle(document.getElementById('menu')).opacity === '1', null, { timeout: 8000 }).catch(() => {});
+check('Loading screen fades out into the menu', await ev(() => !document.getElementById('loading').classList.contains('on') && document.getElementById('menu').classList.contains('in') && getComputedStyle(document.getElementById('menu')).opacity === '1'));
 check('Menu has large Drive and Settings buttons', await page.isVisible('#btnDrive') && await page.isVisible('#btnSettings'));
 await ev(() => localStorage.removeItem('monacoTT.best.v1'));
 await page.tap('#btnDrive');
@@ -47,7 +54,12 @@ check('Car spawns before the start/finish line, timing not started', await ev(()
 const rect = async (sel) => page.$eval(sel, e => { const r = e.getBoundingClientRect(); return { x: r.left, y: r.top, w: r.width, h: r.height }; });
 const sz = await rect('#steerZone'), th = await rect('#throttle'), br = await rect('#brake');
 const vp = page.viewportSize();
-check('Touch targets kept away from the screen edges', sz.x >= 18 && th.x + th.w <= vp.width - 18 && sz.y + sz.h <= vp.height - 14 && th.y + th.h <= vp.height - 14, `steer ${sz.x.toFixed(0)}px from left, pedals ${(vp.width - th.x - th.w).toFixed(0)}px from right, bottom gap ${(vp.height - th.y - th.h).toFixed(0)}px`);
+{
+  const w0 = Math.min(vp.width * 0.42, 400), h0 = Math.min(vp.height * 0.46, 210);     // previous size
+  check('Steering zone exactly 20% smaller, bottom-left, inside the safe area', Math.abs(sz.w - 0.8 * w0) < 1 && Math.abs(sz.h - 0.8 * h0) < 1 && sz.x < vp.width * 0.06 && vp.height - (sz.y + sz.h) <= 16,
+    `${sz.w.toFixed(1)} x ${sz.h.toFixed(1)} px (was ${w0.toFixed(1)} x ${h0.toFixed(1)}), ${sz.x.toFixed(0)} px from the left, ${(vp.height - sz.y - sz.h).toFixed(0)} px from the bottom`);
+}
+check('Touch targets kept away from the screen edges', sz.x >= 18 && th.x + th.w <= vp.width - 18 && sz.y + sz.h <= vp.height - 10 && th.y + th.h <= vp.height - 14, `steer ${sz.x.toFixed(0)}px from left, pedals ${(vp.width - th.x - th.w).toFixed(0)}px from right, bottom gap ${(vp.height - th.y - th.h).toFixed(0)}px`);
 // left thumb starts off-centre in the zone and slides right; right thumb on the throttle
 const sx = sz.x + sz.w * 0.3, sy = sz.y + sz.h * 0.5;
 const tx = th.x + th.w / 2, ty = th.y + th.h * 0.3;
@@ -57,11 +69,22 @@ await touch('touchMove', [{ x: sx + sz.w * 0.25, y: sy, id: 1 }, { x: tx, y: ty,
 await wait(250);
 let c = await ev(() => { const k = window.__app.controls; return { steer: k.steer, thr: k.throttle, brk: k.brake }; });
 check('Steering starts anywhere in its zone and works with the throttle held', c.steer > 0.4 && c.thr > 0.95, `steer ${c.steer.toFixed(2)}, throttle ${c.thr.toFixed(2)}`);
-// slide the throttle thumb onto the brake
-await touch('touchMove', [{ x: sx + sz.w * 0.25, y: sy, id: 1 }, { x: br.x + br.w / 2, y: br.y + br.h * 0.3, id: 2 }]);
+// steering direction: a right input turns the steering wheel clockwise (as the driver sees it),
+// the front wheels to the right and the car to the right
+await wait(400);
+c = await ev(() => { const a = window.__app; const sw = a.car.root.userData.steeringWheel; return { steer: a.controls.steer, delta: a.veh.delta, wheel: sw.rotation.z, fl: a.car.wheels[0].steer.rotation.y, fr: a.car.wheels[1].steer.rotation.y, r: a.veh.r, v: a.veh.speed }; });
+check('Right input: steering wheel clockwise, front wheels and car turn right', c.steer > 0 && c.delta < 0 && c.wheel < 0 && c.fl < 0 && c.fr < 0 && c.r < 0 && Math.abs(c.wheel / c.delta - 4.4) < 0.01,
+  `steer ${c.steer.toFixed(2)} -> road wheels ${(c.delta * 57.3).toFixed(1)}°, steering wheel ${(c.wheel * 57.3).toFixed(0)}° (ratio ${(c.wheel / c.delta).toFixed(1)}:1), yaw rate ${(c.r * 57.3).toFixed(1)}°/s at ${(c.v * 3.6).toFixed(0)} km/h`);
+// slide the throttle thumb onto the top of the brake pad (full pressure)
+await touch('touchMove', [{ x: sx + sz.w * 0.25, y: sy, id: 1 }, { x: br.x + br.w / 2, y: br.y + br.h * 0.08, id: 2 }]);
 await wait(20);
 c = await ev(() => { const k = window.__app.controls; k.update(0.016); return { thr: k.throttle, brk: k.brake }; });
-check('Sliding from throttle to brake releases the throttle immediately', c.thr === 0 && c.brk > 0.9, `throttle ${c.thr}, brake ${c.brk.toFixed(2)}`);
+check('Sliding from throttle to brake releases the throttle immediately', c.thr === 0 && c.brk > 0.95, `throttle ${c.thr}, brake ${c.brk.toFixed(2)}`);
+// progressive pad: lower on the pad = less pedal pressure (to trail off as downforce drops)
+await touch('touchMove', [{ x: sx + sz.w * 0.25, y: sy, id: 1 }, { x: br.x + br.w / 2, y: br.y + br.h * 0.85, id: 2 }]);
+await wait(20);
+const cLow = await ev(() => { const k = window.__app.controls; k.update(0.016); return k.brake; });
+check('Brake pad is progressive (pressure follows the thumb height)', cLow > 0.25 && cLow < 0.5 && cLow < c.brk, `top ${c.brk.toFixed(2)}, low ${cLow.toFixed(2)}`);
 await touch('touchEnd', []);
 await wait(300);
 c = await ev(() => { const k = window.__app.controls; return { steer: k.steer, thr: k.throttle, brk: k.brake }; });
@@ -78,8 +101,11 @@ check('Neutral steering returns to exactly zero', c.steer === 0 && c.raw === 0 &
   await touch('touchEnd', []);
   check('Resting thumb tremor on the steering zone gives exactly zero steering', r.steer === 0 && r.raw === 0, `steer ${r.steer}, raw ${r.raw}`);
 }
-// throttle only, no steering touch: zero steering throughout and the car does not yaw
+// throttle only, no steering touch: zero steering throughout and the car does not yaw (from a
+// standing start at the grid, after the steering checks above turned the car)
 {
+  await ev(() => { const a = window.__app, T = a.track; a.veh.reset(T.spawnS, T.spawnD ?? 1.6, { speed: 0 }); a.timing.teleport(a.veh.s); });
+  await wait(300);
   await ev(() => { const a = window.__app; a.__hd = { psi0: a.veh.psi, maxSteer: 0, maxDelta: 0, maxR: 0 }; a.__hdT = setInterval(() => { const h = a.__hd; h.maxSteer = Math.max(h.maxSteer, Math.abs(a.controls.steer)); h.maxDelta = Math.max(h.maxDelta, Math.abs(a.veh.delta)); h.maxR = Math.max(h.maxR, Math.abs(a.veh.r)); }, 10); });
   await touch('touchStart', [{ x: tx, y: ty, id: 4 }]);
   await wait(1500);
@@ -223,6 +249,36 @@ check('Personal best restored after a fresh reload', menuBest.includes('1:17.777
 await page.setViewportSize({ width: 440, height: 956 });
 await wait(300);
 check('Portrait shows "Rotate your phone to play."', await page.isVisible('#rotate') && (await page.textContent('#rotate p')).includes('Rotate your phone to play.'));
+
+// ---- real-time mirrors (rendered page) -------------------------------------------------------------
+await page.setViewportSize(dev.viewport);
+await page.goto(root + '?start=drive&noaudio=1&q=high');
+await page.waitForFunction(() => window.__ready === true, null, { timeout: 120000 });
+const mirrorStats = async (id) => ev(async (id) => {
+  const a = window.__app, T = a.track, THREE = a.THREE;
+  a.__autoOverride = false; a.controls.enabled = false; a.controls.clear();
+  a.veh.reset(T.wrapS(T.corners.find(c => c.id === id).s + 30), 0, { speed: 0 }); a.timing.teleport(a.veh.s);
+  a.rig.setMode('tcam');
+  const r0 = a.mirrors.stats.renders;
+  await new Promise(r => setTimeout(r, 1500));
+  const out = { renders: a.mirrors.stats.renders - r0, mirrors: [] };
+  for (const m of a.mirrors.list) {
+    const { width: w, height: h } = m.rt;
+    const buf = new Uint16Array(w * h * 4);
+    a.renderer.readRenderTargetPixels(m.rt, 0, 0, w, h, buf);
+    let sum = 0, sum2 = 0; const lum = new Float32Array(w * h);
+    for (let i = 0; i < w * h; i++) { const l = 0.2126 * THREE.DataUtils.fromHalfFloat(buf[i * 4]) + 0.7152 * THREE.DataUtils.fromHalfFloat(buf[i * 4 + 1]) + 0.0722 * THREE.DataUtils.fromHalfFloat(buf[i * 4 + 2]); lum[i] = l; sum += l; sum2 += l * l; }
+    const mean = sum / (w * h);
+    out.mirrors.push({ side: m.side, w, h, mean, sd: Math.sqrt(Math.max(0, sum2 / (w * h) - mean * mean)), lum: Array.from(lum.filter((_, i) => i % 7 === 0)) });
+  }
+  return out;
+}, id);
+const mA = await mirrorStats('ste-devote'), mB = await mirrorStats('pool1');
+const diff = mA.mirrors.map((m, i) => { const o = mB.mirrors[i].lum; let d = 0; for (let k = 0; k < m.lum.length; k++) d += Math.abs(m.lum[k] - o[k]); return d / m.lum.length; });
+check('Mirrors render the scene behind the car in real time (two render targets, refreshed every frame pair)',
+  mA.mirrors.length === 2 && mA.renders >= 2 && mA.mirrors.every(m => m.sd > 0.01 && m.mean > 0.005),
+  `${mA.renders} mirror passes in 1.5 s (software GL), ${mA.mirrors.map(m => `${m.side < 0 ? 'L' : 'R'} ${m.w}x${m.h} mean ${m.mean.toFixed(3)} sd ${m.sd.toFixed(3)}`).join(', ')}`);
+check('Mirror images change with the surroundings (Ste Dévote vs Swimming Pool)', diff.every(d => d > 0.01), `mean abs difference L ${diff[0].toFixed(3)}, R ${diff[1].toFixed(3)}`);
 
 check('No uncaught page errors', errors.length === 0, errors.slice(0, 3).join(' | '));
 const failed = results.filter(r => !r.ok).length;

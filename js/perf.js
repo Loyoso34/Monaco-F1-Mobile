@@ -26,6 +26,7 @@ export class Perf {
     this.tierName = name; this.tier = TIERS[name];
     this.scale = 1;
     this.apply();
+    if (this.onTier) this.onTier(name);
   }
   apply() {
     const dpr = Math.min(window.devicePixelRatio || 1, 3);

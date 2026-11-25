@@ -34,7 +34,8 @@ scene.add(sun);
 const car = createCar({ quality: 'high' });
 scene.add(car.root);
 const steer = +(P.get('steer') || 0) * Math.PI / 180;
-car.update({ steer, steeringWheel: steer * 4.4 });
+const dash = { dt: 0.1, time: 0, rpm: +(P.get('rpm') || 11200), kmh: +(P.get('kmh') || 238), gear: P.get('gear') || '6', ers: 0.74, bias: 0.57, lock: false, limiter: false };
+car.update({ steer, steeringWheel: steer * 4.4, dash });
 // ground + 0.1 m grid
 const ground = new THREE.Mesh(new THREE.PlaneGeometry(20, 20), new THREE.MeshStandardMaterial({ color: 0x9aa1a8, roughness: 0.95 }));
 ground.rotation.x = -Math.PI / 2; ground.receiveShadow = true; scene.add(ground);
@@ -62,6 +63,16 @@ else if (view === 'haloside') { cam = new THREE.PerspectiveCamera(24, W / H, 0.0
 else if (view === 'halorear') { cam = new THREE.PerspectiveCamera(30, W / H, 0.05, 100); cam.position.set(1.1, 1.55, Z.FA + 2.9); cam.lookAt(0, 0.74, Z.FA + 1.2); }
 else if (view === 'halofront') { cam = new THREE.PerspectiveCamera(16, W / H, 0.05, 100); cam.position.set(0.35, 1.05, Z.FA + 0.05); cam.lookAt(0, 0.74, Z.FA + 0.95); }
 else if (view === 'pillarback') { cam = new THREE.PerspectiveCamera(14, W / H, 0.02, 100); cam.position.set(0.05, 0.70, Z.FA + 1.55); cam.lookAt(0, 0.76, Z.FA + 0.94); }
+else if (view === 'wheelfront' || view === 'wheelside' || view === 'wheeltop') {
+  // close-ups of the steering wheel and gloves (camera placed in the wheel's own frame)
+  const drv = car.root.getObjectByName('driver'); if (drv) drv.visible = false;
+  car.root.updateMatrixWorld(true);
+  const SW = car.root.getObjectByName('steeringWheel');
+  const at = new THREE.Vector3(0, 0, 0).applyMatrix4(SW.matrixWorld);
+  const off = view === 'wheelfront' ? new THREE.Vector3(0.0, 0.05, 0.42) : view === 'wheelside' ? new THREE.Vector3(0.42, 0.05, 0.12) : new THREE.Vector3(0.12, 0.40, 0.18);
+  const from = off.applyMatrix4(SW.matrixWorld);
+  cam = new THREE.PerspectiveCamera(36, W / H, 0.01, 100); cam.position.copy(from); cam.lookAt(at);
+}
 else if (view === 'tcam' || view === 'cockpit') {
   const m = CAMERA_MOUNTS[view];
   const hfov = +(P.get('hfov') || 0);

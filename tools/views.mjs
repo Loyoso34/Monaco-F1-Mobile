@@ -53,6 +53,24 @@ export const VIEWS = {
   'ste-devote-tcam': { car: { at: ['ste-devote', -80], d: 0 }, cam: 'tcam' },
   'beau-rivage-tcam': { car: { at: ['beau-rivage', -40], d: 0 }, cam: 'tcam' },
   'casino-tcam': { car: { at: ['casino', -60], d: 0 }, cam: 'tcam' },
+  // mirrors (real-time reflections): onboard cameras and zooms on each glass from the eye
+  // road surface: braking rubber / lock-up marks, exit traction lines, patches and covers
+  'road-ste-devote-brake': { from: ['ste-devote', -75, 0.5, 1.5], to: ['ste-devote', -25, 0, 0], fov: 58 },
+  'road-chicane-brake': { from: ['chicane', -95, 0, 1.4], to: ['chicane', -35, 0, 0], fov: 58 },
+  'road-chicane-top': { from: ['chicane', -45, 0, 22], to: ['chicane', -44, 0, 0], fov: 50 },
+  'road-hairpin-exit': { from: ['hairpin', 18, 0, 2.2], to: ['hairpin', 60, 0, 0], fov: 58 },
+  'road-casino-close': { from: ['casino', -45, 1.5, 0.9], to: ['casino', -33, -0.5, 0], fov: 52 },
+  'road-mirabeau-top': { from: ['mirabeau', -35, 0, 26], to: ['mirabeau', -34, 0, 0], fov: 50 },
+  'kerb-pool-close': { from: ['pool1', -22, 0, 1.1], to: ['pool1', 2, 0, 0], fov: 55 },
+  'kerb-rascasse-close': { from: ['rascasse', -18, 0, 1.1], to: ['rascasse', 4, 0, 0], fov: 55 },
+  'mirrors-cockpit': { car: { at: ['ste-devote', 30], d: 0 }, cam: 'cockpit' },
+  'mirrors-tcam': { car: { at: ['ste-devote', 30], d: 0 }, cam: 'tcam' },
+  'mirror-left-zoom': { carRel: { at: ['ste-devote', 30], d: 0, eye: [0, 0.70, -0.476], look: [-0.490, 0.660, -0.746], fov: 18 } },
+  'mirror-right-zoom': { carRel: { at: ['ste-devote', 30], d: 0, eye: [0, 0.70, -0.476], look: [0.490, 0.660, -0.746], fov: 18 } },
+  'mirrors-chase-close': { carRel: { at: ['ste-devote', 30], d: 0, eye: [1.1, 1.25, 1.6], look: [0.2, 0.62, -0.7], fov: 34 } },
+  'mirror-right-outside': { carRel: { at: ['ste-devote', 30], d: 0, eye: [1.05, 0.95, 0.10], look: [0.49, 0.66, -0.746], fov: 30 } },
+  'mirror-right-front': { carRel: { at: ['ste-devote', 30], d: 0, eye: [1.0, 0.85, -1.85], look: [0.49, 0.64, -0.746], fov: 30 } },
+  'mirrors-tunnel-cockpit': { car: { at: 'tunnel+160', d: 1 }, cam: 'cockpit' },
   // halo
   'halo-tcam': { car: { at: 'spawn', d: 'spawn' }, cam: 'tcam' },
   'halo-cockpit': { car: { at: 'spawn', d: 'spawn' }, cam: 'cockpit' },
@@ -83,7 +101,13 @@ for (const [name, v] of Object.entries(VIEWS)) {
       return T.wrapS(T.corners.find(c => c.id === ref).s);
     };
     a.freeCam = null;
-    if (v.car) {
+    if (v.carRel) {
+      const s = resolve(v.carRel.at);
+      a.veh.reset(s, v.carRel.d, { speed: 0 }); a.timing.teleport(a.veh.s);
+      a.__autoOverride = false; a.controls.enabled = false; a.controls.clear();
+      // the camera is attached once the car has settled on the road (next evaluate)
+      a.__carRel = v.carRel;
+    } else if (v.car) {
       const s = resolve(v.car.at);
       a.veh.reset(s, v.car.d === 'spawn' ? (T.spawnD ?? 1.6) : v.car.d, { speed: 0 });
       a.timing.teleport(a.veh.s);
@@ -98,6 +122,16 @@ for (const [name, v] of Object.entries(VIEWS)) {
     }
     a.lightS = null;
   }, [v]);
+  if (v.carRel) {
+    await page.waitForTimeout(500);
+    await page.evaluate(() => {
+      const a = window.__app, c = a.__carRel;
+      a.car.root.updateMatrixWorld(true);
+      const M = a.car.chassis.matrixWorld;
+      const e = new a.THREE.Vector3(...c.eye).applyMatrix4(M), l = new a.THREE.Vector3(...c.look).applyMatrix4(M);
+      a.freeCam = { pos: [e.x, e.y, e.z], look: [l.x, l.y, l.z], fov: c.fov };
+    });
+  }
   await page.waitForTimeout(900);
   await page.screenshot({ path: path.join(out, `${name}.png`) });
   process.stdout.write(name + ' ');

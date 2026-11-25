@@ -19,11 +19,44 @@ const CLA = 5.05, AERO_FRONT = 0.44;          // Monaco high-downforce
 const CDA = 1.58;
 const IZ = 1250;                               // yaw inertia kg m^2
 const MU0 = 1.86, MUX = 1.95, LOAD_SENS = 0.085;
-// the 405 mm rears carry more load before their grip coefficient falls, and are stiffer
-const AXLE = { front: { mu: 1.0, fz0: 2300, B: 17.5 }, rear: { mu: 1.07, fz0: 3000, B: 19.5 } };
-const TYRE_C = 1.45;                           // lateral peak ~5.5-6 deg, ~25 % drop when sliding
-const BRAKE_MAX = 5.4 * 805 * G, BRAKE_FRONT = 0.60;
+// Tyres (Pirelli C5/C4-type, warm): combined-slip "similarity" model. Each axle has its own
+// peak slip ratio (kp) and peak slip angle (ap); the force magnitude follows a Pacejka-type
+// curve of the normalised combined slip with its peak at 1 and ~76 % of the peak when fully
+// sliding (a locked or spinning tyre). The 405 mm rears carry more load before their grip
+// coefficient falls, and are stiffer.
+const TYRE_C = 1.45, TYRE_B = Math.tan(Math.PI / (2 * TYRE_C));
+const AXLE = {
+  front: { mu: 1.0, fz0: 2300, kp: 0.10, ap: Math.atan(1.85 / 17.5), I: 1.15 },
+  rear: { mu: 1.07, fz0: 3000, kp: 0.11, ap: Math.atan(1.85 / 19.5), I: 1.45 },
+};
+const V_EPS = 3.0;                             // m/s: slip regularisation at very low speed
+const I_ENGINE = 0.045;                        // kg m^2: crank, flywheel, MGU-K / MGU-H rotors
+const DIFF_C = 60;                             // N m s/rad: limited-slip coupling of the rears
+// Brakes: carbon discs, driver pedal -> line pressure (hydraulic build-up ~50 ms). At full
+// pedal the system makes 4.4 g of braking force at the contact patches: more than the tyres
+// can take below ~230 km/h (lock-ups are possible if the driver keeps full pressure as the
+// downforce falls away), less than the grip at the end of the tunnel (no lock at 290 km/h).
+const BRAKE_FORCE_MAX = 4.4 * 805 * G;
+const BRAKE_TAU_UP = 0.05, BRAKE_TAU_DOWN = 0.035;
 const ES_MAX = 4e6;
+
+// Normalised combined-slip force: kappa (slip ratio), tanA (tan slip angle, + = patch sliding
+// right), axle peak slips. Returns [fx, fy] in units of the peak forces Dx, Dy.
+const _tf = [0, 0];
+function tyreForce(kappa, tanA, ax) {
+  const sx = kappa / ax.kp, sy = tanA / Math.tan(ax.ap);
+  const s = Math.hypot(sx, sy);
+  if (s < 1e-9) { _tf[0] = 0; _tf[1] = 0; return _tf; }
+  const f = Math.sin(TYRE_C * Math.atan(TYRE_B * s));
+  _tf[0] = f * sx / s; _tf[1] = -f * sy / s;
+  return _tf;
+}
+// Ideal (equal-utilisation) front brake bias of this car vs speed, used to set the brake-by-
+// wire map: a little more front than ideal so the fronts always reach the limit first.
+export function brakeBias(v) {
+  // 57 % at high speed (aero platform loaded) rising to 59.5 % at hairpin speeds
+  return 0.57 + 0.025 * Math.max(0, Math.min(1, (70 - v) / 50));
+}
 
 export function wheelRate(v) { return v / R_ROLL; }
 
@@ -73,7 +106,8 @@ export class Vehicle {
     this.rpm = IDLE_RPM; this.rpmVis = IDLE_RPM;
     this.shiftTimer = 0; this.shiftCut = 0; this.lastShift = 0; this.blip = 0;
     this.reverse = false; this.reverseHold = 0;
-    this.ax = 0; this.ay = 0; this.axF = 0; this.ayF = 0;
+    this.ax = 0; this.ay = 0; this.axF = 0; this.ayF = 0; this.axL = 0; this.ayL = 0;
+    this.brakeP = 0; this.bias = brakeBias(speed); this.tc = 1;
     this.pitch = 0; this.roll = 0; this.heave = 0; this.yRoadPitch = 0; this.yRoadRoll = 0;
     this.es = ES_MAX; this.deploy = 0; this.harvest = 0; this.boost = 0;
     this.load = 0; this.torqueOut = 0; this.engineTorque = 0;
@@ -82,7 +116,7 @@ export class Vehicle {
     this.curb = [0, 0, 0, 0];
     this.slide = 0; this.scrub = 0;
     this.offTrack = 0;
-    for (const w of this.wheels) { w.spin = 0; w.omega = 0; w.travel = 0; w.sd.s = s; w.sd.d = d; }
+    for (const w of this.wheels) { w.spin = 0; w.omega = speed / R_ROLL; w.kappa = 0; w.travel = 0; w.sd.s = s; w.sd.d = d; }
     if (!keepDamage) this.damage.reset();
     this.events.length = 0;
     this._updateAttitude(0);
@@ -136,13 +170,16 @@ export class Vehicle {
     const drivePedal = this.reverse ? brk : thr;
     const brakePedal = this.reverse ? (thr > 0.1 ? thr : 0) : brk;
 
+    const ws = this.wheels;
     const ratio = this.reverse ? REVERSE_RATIO : RATIOS[this.gear - 1];
-    const wheelOmega = Math.abs(u) / R_ROLL;
-    const rearSlip = Math.max(this.wheels[2].slipX, this.wheels[3].slipX);
-    let rpmWheel = wheelOmega * ratio * 30 / Math.PI * (1 + Math.min(0.35, rearSlip));
-    // clutch slip / launch control in first (and reverse): engine held up while the clutch slips
-    let rpm = rpmWheel;
-    if (this.gear === 1 || this.reverse) rpm = Math.max(rpm, IDLE_RPM + drivePedal * 5200 * Math.max(0, 1 - rpmWheel / 9500));
+    // engine speed follows the driven wheels (clutch engaged); the clutch slips at launch
+    const omegaAxle = (ws[2].omega + ws[3].omega) / 2;
+    const rpmWheel = Math.abs(omegaAxle) * ratio * 30 / Math.PI;
+    let rpm = rpmWheel, clutchSlip = false;
+    if ((this.gear === 1 || this.reverse) && rpmWheel < 9500) {
+      const launch = IDLE_RPM + drivePedal * 5200 * Math.max(0, 1 - rpmWheel / 9500);
+      if (launch > rpm) { rpm = launch; clutchSlip = drivePedal > 0.02; }
+    }
     rpm = Math.max(rpm, IDLE_RPM);
     // downshift blip lifts the revs briefly towards the next gear's speed
     if (this.blip > 0) { rpm = Math.max(rpm, this.blipRpm * (0.6 + 0.4 * this.blip / 0.09)); this.blip -= dt; }
@@ -150,6 +187,10 @@ export class Vehicle {
     this.rpm = rpm;
     const omegaE = rpm * Math.PI / 30;
 
+    // Throttle pedal -> torque demand map (engine mapping): progressive over the first part of
+    // the pedal travel in the low gears.
+    const gearSoft = !this.reverse ? Math.max(0, (4 - this.gear) / 3) : 0;
+    const torqueDemand = Math.pow(drivePedal, 1 + 0.6 * gearSoft);
     // ICE power from the fuel-flow limit (100 kg/h above 10,500 rpm)
     const ff = Math.min(1, Math.max(0.14, (0.009 * rpm + 5.5) / 100));
     const Pice = 560e3 * ff;
@@ -161,28 +202,30 @@ export class Vehicle {
     if (this.deploy > 0) this.es = Math.max(0, this.es - (Pk - 80e3) * dt);
     const limiter = rpm > LIMIT_RPM ? Math.max(0, 1 - (rpm - LIMIT_RPM) / 150) : 1;
     const cut = this.shiftCut > 0 ? 0.12 : 1;
-    let Tcrank = (drivePedal * (Pice / omegaE) + Pk / omegaE) * limiter * cut;
+    let Tcrank = (torqueDemand * (Pice / omegaE) + Pk / omegaE) * limiter * cut;
     // engine braking when lifted
     const Tfric = (16 + 0.0062 * rpm) * (1 - drivePedal);
     Tcrank -= Tfric;
     this.engineTorque = Tcrank;
-    this.load = Math.max(0, Math.min(1, (drivePedal * limiter * cut)));
-    let Fdrive = Tcrank * ratio * DRIVELINE_EFF / R_ROLL;    // at the rear contact patches (total)
-    if (this.reverse) Fdrive = -Math.max(0, Fdrive) * 0.35;
-    if (Math.abs(u) < 0.3 && drivePedal < 0.02 && Fdrive < 0) Fdrive = 0;   // no creeping backwards
-    if (u < 0 && !this.reverse && Fdrive < 0) Fdrive = Math.min(0, -Fdrive);
-    // MGU-K harvest. Under braking the brake-by-wire system blends regen into the rear
-    // braking (total rear braking still equals the driver's demand); when lifting without
-    // braking a smaller "lift and coast" regen adds to engine braking.
-    let Fharvest = 0, FliftRegen = 0;
-    if (u > 6 && this.es < ES_MAX) {
-      let Ph = 0;
+    this.load = Math.max(0, Math.min(1, (torqueDemand * limiter * cut)));
+    // MGU-K harvest torque on the crank (braking: up to 120 kW; lift-and-coast: 45 kW)
+    let Ph = 0;
+    if (u > 6 && this.es < ES_MAX && !this.reverse) {
       if (brakePedal > 0.1) Ph = 120e3 * Math.min(1, brakePedal * 1.5);
-      else if (drivePedal < 0.05 && u > 20) { Ph = 45e3; FliftRegen = Ph / u; }
-      Fharvest = Ph / Math.max(6, u);
+      else if (drivePedal < 0.05 && u > 20) Ph = 45e3;
       this.harvest = Ph / 120e3;
       this.es = Math.min(ES_MAX, this.es + Ph * dt * 0.95);
     }
+    if (Ph > 0) Tcrank -= Ph / Math.max(300, omegaE);
+    // torque at the rear axle (sum of both wheels); a slipping clutch passes the engine torque
+    let Taxle = Tcrank * ratio * DRIVELINE_EFF;
+    // traction control (Driving assists: Standard only): drive torque trimmed while the driven
+    // wheels slip beyond their peak. Braking is never assisted (no ABS in either mode).
+    if (Taxle > 0) Taxle *= this.tc;
+    if (this.reverse) Taxle = -Math.max(0, Taxle) * 0.35;
+    if (Math.abs(u) < 0.3 && drivePedal < 0.02 && Taxle < 0) Taxle = 0;          // no creeping backwards
+    // engine + driveline inertia seen by each rear wheel while the clutch is closed
+    const Iengine = clutchSlip ? 0 : I_ENGINE * ratio * ratio / 2;
     this.boost += ((drivePedal > 0.3 ? drivePedal : 0) * Math.min(1, rpm / 9000) - this.boost) * Math.min(1, dt * 7);
 
     // --- loads ----------------------------------------------------------------------------------
@@ -191,26 +234,39 @@ export class Vehicle {
     const FdF = Fdown * AERO_FRONT * dmg.frontAero, FdR = Fdown * (1 - AERO_FRONT) * dmg.rearAero;
     const asym = (dmg.frontLeft - dmg.frontRight) * 0.5;      // damaged side loses more
     const Wf = m * G * this.b / L, Wr = m * G * this.a / L;
-    const dLong = m * this.axF * this.h / L;                  // + accel -> load to the rear
+    // load transfer from the chassis accelerations (stiff F1 platform: ~15 ms lag)
+    const dLong = m * this.axL * this.h / L;                  // + accel -> load to the rear
     const rsdF = 0.52;
-    const dLatF = m * this.ayF * this.h / tf * rsdF;          // + right accel -> load to the left
-    const dLatR = m * this.ayF * this.h / SPEC.trackRear * (1 - rsdF);
-    const ws = this.wheels;
+    const dLatF = m * this.ayL * this.h / tf * rsdF;          // + right accel -> load to the left
+    const dLatR = m * this.ayL * this.h / SPEC.trackRear * (1 - rsdF);
     ws[0].Fz = Wf / 2 + FdF / 2 * (1 + asym) - dLong / 2 + dLatF / 2;
     ws[1].Fz = Wf / 2 + FdF / 2 * (1 - asym) - dLong / 2 - dLatF / 2;
     ws[2].Fz = Wr / 2 + FdR / 2 + dLong / 2 + dLatR / 2;
     ws[3].Fz = Wr / 2 + FdR / 2 + dLong / 2 - dLatR / 2;
 
-    // --- per-wheel tyre forces -----------------------------------------------------------------
+    // --- brakes: line pressure follows the pedal; brake-by-wire rear circuit ------------------
+    const tauB = brakePedal > this.brakeP ? BRAKE_TAU_UP : BRAKE_TAU_DOWN;
+    this.brakeP += (brakePedal - this.brakeP) * Math.min(1, dt / tauB);
+    if (this.brakeP < 1e-4) this.brakeP = 0;
+    const bias = brakeBias(v);
+    this.bias = bias;
+    const TbTotal = this.brakeP * BRAKE_FORCE_MAX * R_ROLL;
+    const TbFront = TbTotal * bias / 2;
+    // the BBW sets the rear hydraulic pressure so that hydraulic + drivetrain braking (MGU-K
+    // regen, engine braking) on each rear wheel equals the driver's rear demand
+    const TbRearTarget = TbTotal * (1 - bias) / 2;
+    const TbRear = this.brakeP > 0.02 ? Math.max(0, TbRearTarget - Math.max(0, -Taxle) / 2) : 0;
+
+    // --- per-wheel tyre forces with wheel rotational dynamics ----------------------------------
+    // Each wheel's spin is integrated semi-implicitly (tyre force linearised in the wheel speed)
+    // with the brake as Coulomb friction, so a wheel locks only when the brake torque exceeds
+    // what the tyre can transmit, and rolls again as soon as the pressure drops.
     let Ff = 0, Fr = 0, Mz = 0;
-    const brakeTotal = brakePedal * BRAKE_MAX;
-    // brake migration: bias moves forward as speed (and downforce) falls
-    const bias = BRAKE_FRONT + 0.03 * Math.max(0, Math.min(1, (45 - v) / 30));
-    const rearHydraulic = Math.max(0, brakeTotal * (1 - bias) - Fharvest);
     let scrub = 0, slide = 0;
+    const diffT = DIFF_C * (ws[3].omega - ws[2].omega);       // to the slower rear wheel
     for (let i = 0; i < 4; i++) {
       const w = ws[i];
-      if (this.damage.wheelLost.has(w.id)) { w.Fz = 0; w.Fx = w.Fy = 0; continue; }
+      if (this.damage.wheelLost.has(w.id)) { w.Fz = 0; w.Fx = w.Fy = 0; w.omega = 0; continue; }
       const Fz = Math.max(0, w.Fz);
       // wheel contact patch velocity in the car frame
       const uw = u + this.r * w.ro;
@@ -222,70 +278,75 @@ export class Vehicle {
       const vt = uw * sd + vw * cd;          // across the wheel (+ right)
       // surface grip
       const surf = w.surface;
-      let muS = surf === 1 ? 0.94 : surf === 2 ? 0.88 : surf === 3 ? 0.75 : 1.0;
+      const muS = surf === 1 ? 0.94 : surf === 2 ? 0.88 : surf === 3 ? 0.75 : 1.0;
       const camberLoss = 1 - Math.min(0.25, Math.abs(dmg.camber[w.id] || 0) * 2.2);
       const ax = w.front ? AXLE.front : AXLE.rear;
       const loadF = Math.max(0.72, Math.min(1.12, 1 - LOAD_SENS * (Fz / ax.fz0 - 1)));
-      const muY = MU0 * ax.mu * loadF * muS * camberLoss, muX = MUX * ax.mu * loadF * muS * camberLoss;
-      const Dy = muY * Fz, Dx = muX * Fz;
-      const alpha = Math.atan2(vt, Math.max(Math.abs(ut), 3.0));
-      w.slipA = alpha;
-      let FyPure = -Dy * Math.sin(TYRE_C * Math.atan(ax.B * alpha));
+      const Dy = MU0 * ax.mu * loadF * muS * camberLoss * Fz, Dx = MUX * ax.mu * loadF * muS * camberLoss * Fz;
+      const den = Math.max(Math.abs(ut), V_EPS);
+      const tanA = vt / den;
+      w.slipA = Math.atan(tanA);
+      // torques on this wheel (+ = drives it forward)
+      const Td = w.front ? 0 : Taxle / 2 + (i === 2 ? diffT : -diffT);
+      const Tb = w.front ? TbFront : TbRear;
+      const Iw = ax.I + (w.front ? 0 : Iengine);
+      // tyre longitudinal force at the current spin and its slope (for the implicit step)
+      const r = R_ROLL;
+      const k0 = (w.omega * r - ut) / den;
+      const fx0 = tyreForce(k0, tanA, ax)[0] * Dx;
+      const fx1 = tyreForce(k0 + 1e-4, tanA, ax)[0] * Dx;
+      const kOm = Math.max(0, (fx1 - fx0) / 1e-4) * r / den;  // dFx/domega (stable part)
+      const A = Iw + dt * kOm * r;
+      const T0 = Td - fx0 * r;
+      let om = w.omega;
+      if (om !== 0) {
+        const sgn = Math.sign(om);
+        let o1 = om + dt * (T0 - Tb * sgn) / A;
+        if (Math.sign(o1) !== sgn) {
+          // the brake stops the wheel: it stays locked if the brake can hold it
+          const Tz = T0 + kOm * r * om;
+          o1 = Math.abs(Tz) <= Tb ? 0 : dt * (Tz - Tb * Math.sign(Tz)) / A;
+        }
+        om = o1;
+      } else {
+        const Tz = T0;
+        om = Math.abs(Tz) <= Tb ? 0 : dt * (Tz - Tb * Math.sign(Tz)) / A;
+      }
+      if (!isFinite(om)) om = ut / r;
+      w.omega = om;
+      // forces at the new spin
+      const kap = (om * r - ut) / den;
+      const tfv = tyreForce(kap, tanA, ax);
+      let Fx = tfv[0] * Dx, Fy = tfv[1] * Dy;
       // low-speed damping so the car does not creep sideways
-      if (Math.abs(ut) < 3) FyPure += -vt * Fz * 0.12 * (1 - Math.abs(ut) / 3);
-      // longitudinal demand
-      let FxDem = 0;
-      if (!w.front) FxDem += Fdrive / 2 - (brakePedal > 0.1 ? Fharvest : FliftRegen) / 2;
-      const Fb = w.front ? brakeTotal * bias / 2 : rearHydraulic / 2;
-      const dirU = Math.abs(ut) > 0.05 ? Math.sign(ut) : 0;
-      FxDem -= Fb * dirU;
-      if (dirU === 0 && Fb > 0) FxDem -= Math.max(-Fb, Math.min(Fb, ut * m * 4)); // holding at rest
-      // assists: keep the longitudinal demand inside the available grip
-      const uy = Math.min(1, Math.abs(FyPure) / Math.max(1, Dy));
-      const avail = Dx * Math.sqrt(Math.max(0.05, 1 - uy * uy));
-      if (this.assists === 'standard') {
-        // rear axle keeps a lateral reserve while cornering (stability), fronts may brake to the limit
-        const reserve = !w.front && uy > 0.45 ? 0.88 : 1.0;
-        const capT = avail * 1.03 * reserve, capB = avail * (w.front ? 1.06 : 1.0) * reserve;
-        if (FxDem > capT) FxDem = capT;
-        if (FxDem < -capB) FxDem = -capB;
-      }
-      // combined slip on the friction ellipse
-      let Fx = FxDem, Fy = FyPure;
-      const ex = Fx / Math.max(1, Dx), ey = Fy / Math.max(1, Dy);
-      const n = Math.hypot(ex, ey);
-      w.locked = false; w.spinning = false; w.slipX = 0;
-      if (Math.abs(FxDem) > Dx * 1.04 && v > 2) {
-        // lock-up or wheelspin: the patch slides, total force = sliding friction along the slip
-        const sx = FxDem > 0 ? 1 : -1;
-        w.locked = sx < 0; w.spinning = sx > 0;
-        const excess = Math.abs(FxDem) / Dx - 1;
-        w.slipX = Math.min(1, excess);
-        const slideMu = 0.82;
-        const lat = Math.max(0.18, 0.55 - excess * 0.5);
-        const gx = sx * 1.0, gy = (FyPure / Math.max(1, Dy)) * lat;
-        const nn = Math.hypot(gx, gy);
-        Fx = gx / nn * Dx * slideMu; Fy = gy / nn * Dy * slideMu;
-      } else if (n > 1) {
-        Fx /= n; Fy /= n;
-        const pen = 1 - 0.12 * Math.min(1, n - 1);
-        Fx *= pen; Fy *= pen;
-      }
+      if (Math.abs(ut) < 3) Fy += -vt * Fz * 0.12 * (1 - Math.abs(ut) / 3);
       w.Fx = Fx; w.Fy = Fy;
+      w.kappa = kap;
+      w.locked = Math.abs(ut) > 2 && kap < -0.4;
+      w.spinning = Math.abs(ut) > 0.5 && kap > 0.25;
+      w.slipX = Math.min(1, Math.max(0, (Math.abs(kap) - ax.kp) / (3 * ax.kp)));
       // forces back into the car frame
       const Fcf = Fx * cd + Fy * sd;      // forward
       const Fcr = -Fx * sd + Fy * cd;     // right
       Ff += Fcf; Fr += Fcr;
       Mz += -w.fo * Fcr + w.ro * Fcf;
-      // wheel spin (visual / audio)
-      const spinOmega = w.locked ? 0 : (ut / w.r) * (w.spinning ? 1 + w.slipX * 0.6 : 1);
-      w.omega = spinOmega;
-      w.spin += spinOmega * dt;
-      const slipMag = Math.min(1.5, Math.abs(alpha) / 0.10 + w.slipX * 1.5);
+      w.spin += om * dt;
+      const slipMag = Math.min(1.5, Math.abs(w.slipA) / 0.10 + w.slipX * 1.5);
       scrub += slipMag * Math.min(1, v / 20) * Math.min(1, Fz / 3000);
-      if (w.locked || w.spinning || Math.abs(alpha) > 0.12) slide = Math.max(slide, Math.min(1, w.slipX + Math.abs(alpha) * 3));
+      if (w.locked || w.spinning || Math.abs(w.slipA) > 0.12) slide = Math.max(slide, Math.min(1, w.slipX + Math.abs(w.slipA) * 3));
     }
     this.scrub = scrub / 4; this.slide = slide;
+    // traction-control loop on the driven wheels' slip ratio
+    // (combined slip of the driven tyres, so it also protects their cornering grip)
+    if (this.assists === 'standard') {
+      let sig = 0;
+      for (const w of [ws[2], ws[3]]) {
+        if ((w.kappa || 0) > 0.01) sig = Math.max(sig, Math.hypot(w.kappa / AXLE.rear.kp, Math.tan(w.slipA) / Math.tan(AXLE.rear.ap)));
+      }
+      const target = 1.08;
+      if (sig > target) this.tc = Math.max(0.05, this.tc - dt * 28 * (sig - target));
+      else this.tc = Math.min(1, this.tc + dt * 3);
+    } else this.tc = 1;
 
     // --- aero drag, rolling resistance, gravity on grades -------------------------------------
     const cda = CDA * (1 + dmg.dragAdd);
@@ -314,7 +375,9 @@ export class Vehicle {
     // centripetal included: a_lat = dv_l/dt + u*r
     this.ax = aF; this.ay = aR;
     const kF = Math.min(1, dt * 18);
-    this.axF += (this.ax - this.axF) * kF; this.ayF += (this.ay - this.ayF) * kF;
+    this.axF += (this.ax - this.axF) * kF; this.ayF += (this.ay - this.ayF) * kF;      // visuals
+    const kL = Math.min(1, dt / 0.015);
+    this.axL += (this.ax - this.axL) * kL; this.ayL += (this.ay - this.ayL) * kL;      // load transfer
 
     // --- gearbox --------------------------------------------------------------------------------
     this._gearbox(dt, u, drivePedal, brakePedal);

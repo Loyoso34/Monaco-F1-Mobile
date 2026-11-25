@@ -77,6 +77,31 @@ mesh, the scenery and the automated inspection all use this one corridor.
 * **Verification:** `node tools/inspect-circuit.mjs` checks the rendered triangles of every
   scenery object and the terrain against the corridor (see [TESTING.md](TESTING.md)).
 
+## Road surface (`js/textures.js`, `js/trackmesh.js`)
+
+* **Asphalt:** one 3 m tile at 1,024 px (≈ 2.9 mm / px): dark bitumen binder with fine sand and
+  ~11,000 aggregate stones of 2.4–9.6 mm in three greys (some polished), seamless. A matching
+  **normal map** (stone relief) and **roughness map** (binder 0.95, polished stone tops ~0.62)
+  drive a PBR material with high overall roughness, so the road never looks wet or glossy.
+* **No visible tiling:** a 256 px tileable value-noise texture is sampled at two scales
+  (≈ 40 m and ≈ 10 m) in the road shader and multiplies the albedo by 0.82–1.14, giving
+  laid-section and wear variation that breaks the 3 m repeat.
+* **Rubber on the racing line:** the road colour varies per vertex across the lap with two soft
+  bands under the tyre tracks (±0.8 m from the line, σ 0.42 m) on a wider faint band, lighter
+  between them — no hard stripes.
+* **Generated marks** (`roadDetail` meshes, one per ~600 m, alpha-blended with polygon offset —
+  no z-fighting): front-tyre **braking streaks** in every braking zone found in the racing-line
+  speed profile, darker towards the turn-in and scaled with the speed lost; **lock-up flat-spot
+  marks** near the end of the heavy stops; rear-tyre **traction lines** out of the corners,
+  fading as the car straightens; **saw-cut repair patches** with sealed joints; **crack-seal
+  "tar snakes"**; transverse and longitudinal **seams**; **manhole covers** and **gutter
+  grates** near the edges. Not on the grid or in the tunnel.
+* **Paint:** kerbs, edge lines, the start / finish chequers and grid boxes use their own
+  paint texture (paint film with aggregate pits, rubber scuffs, soft dirt), smoother than the
+  asphalt but keeping some of its relief; kerb red is a deep, saturated paint red.
+
+![Braking zone before the Nouvelle Chicane: braking streaks, lock-up marks, rubbered line](img/road-braking-zone.webp)
+
 ## The tunnel
 
 * **Structure** (`js/trackmesh.js`): armco (1.05 m) with a 7 m sponsor board only every 124 m per

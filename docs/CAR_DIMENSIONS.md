@@ -133,8 +133,55 @@ above the halo); reductions apply to scenery, fences, shadows and resolution.
 ## Livery and materials
 
 Matte navy body (roughness 0.5), red pin-stripes, yellow-to-orange nose tip and airbox with red
-charging-bull silhouettes, sponsor names as plain text at their measured positions and scale
-(they are text approximations, not the real logo artwork), carbon weave (normal-mapped,
-roughness 0.3) on exposed carbon, lacquered carbon halo (clear coat), matte carbon floor, rubber tyres (roughness 0.9) with
-soft-compound red markings, metallic titanium hardware (metalness 0.95), glossy helmet and
-mirror glass. The driver's helmet is a generic design.
+charging-bull silhouettes, carbon weave (normal-mapped, roughness 0.3) on exposed carbon,
+lacquered carbon halo (clear coat), matte carbon floor and floor fences, rubber tyres
+(roughness 0.9) with soft-compound red markings and machined rim lips, metallic titanium
+hardware (metalness 0.95), glossy helmet. The driver's helmet is a generic design.
+
+**Sponsor wordmarks** are conformal decals (`js/decals.js`): each name is drawn into its own
+texture at 2,200–4,000 px/m and projected onto the body triangles it covers (filtered by
+surface normal, so a side decal never wraps onto a top surface), offset 0.7 mm with polygon
+offset, and parented to the part it sits on (it breaks away with that part). Positions follow
+2024 RB20 photos: ORACLE on both sidepods and the rear-wing main plane, Bybit on the tub, the
+front-wing endplates and the rear-wing flap, Red Bull on the engine cover, Honda behind it,
+ROKT on the cockpit shoulder, Rauch on the tub side, Mobil 1 on the nose and the rear-wing
+endplates, and ORACLE on the halo's top (the halo sponsor could not be verified from a
+2024 source in this environment). They are text approximations in a similar weight and
+proportion, not the real logo artwork.
+
+## Cockpit: steering wheel, hands and arms (`js/cockpit.js`)
+
+* **Wheel:** 270 × 160 mm carbon body (extruded outline with rounded grips) on a 4.4 : 1
+  steering ratio — 23° road-wheel lock = ±101° at the wheel. Suede-wrapped grips, 82 × 46 mm
+  digital display (gear, speed, rpm bar, ERS state of charge, brake bias / LOCK) redrawn at
+  ~15 Hz only when something visible changes, 15 shift LEDs (green 9,600 rpm → red → blue at the
+  shift point, all blue flashing on the limiter) and 6 side LEDs (amber while a tyre locks or
+  spins, white in neutral), 12 labelled buttons with alloy rims, 5 knurled rotaries with printed
+  scales (STRAT, DIFF, BMIG, EB, MODE), thumb wheels, upshift / downshift and clutch paddles,
+  quick-release hub. Static parts are merged per material (one draw call each).
+* **Hands:** gloves modelled round the grips (palm shell, four fingers and thumb as capped
+  tubes, cuff with a red strap), knit glove texture with stitched seams. They are children of
+  the wheel, so they turn with it exactly.
+* **Arms:** upper arm 0.28 m, forearm 0.26 m, two-bone IK every frame from the shoulders (just
+  ahead of the helmet) to each wrist, elbows biased outward-down; the reach stays within the
+  arm length over the full ±101°, so the hands never detach or stretch.
+* **Direction:** steering right turns the wheel clockwise as seen by the driver, the front
+  wheels right and the car right (checked by the acceptance test).
+
+  ![Steering wheel](img/cockpit-wheel.webp)
+
+## Mirrors (`js/carmodel.js`, `js/mirrors.js`)
+
+* Reflective surface **200 × 50 mm** (the 2023-onwards minimum width), glass centre 0.49 m
+  from the centre line, 0.66 m high, 1.20 m behind the front axle, above the sidepod inlet.
+* Glass normal halfway between the direction to the driver's eye and straight back, so the
+  driver sees the car's flank on the inboard edge and the track behind.
+* Housing lofted from rounded-rectangle sections (≈ 220 × 70 mm, 82 mm deep); two **blade**
+  stays (46 × 9 mm and 26 × 7 mm sections) from the chassis shoulder end inside the housing
+  ahead of the glass plane, so nothing crosses the line of sight to the glass.
+* Reflection: real-time planar reflector per glass (generalised off-axis projection through the
+  glass rectangle, near plane on the glass), half-float render target 256 × 88 (High),
+  192 × 66 (Medium), 128 × 44 (Low), the two glasses refreshed on alternate frames, skipped when
+  off-screen or seen from behind, no shadow-map update in the mirror pass.
+
+  ![Right mirror seen from the driver's eye: own rear tyre outboard, bodywork inboard](img/mirror-right.webp)

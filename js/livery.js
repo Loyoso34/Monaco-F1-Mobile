@@ -145,22 +145,7 @@ export function makeLiveryTexture(size = 2048) {
       const [, y] = P(0, 0.465);
       ctx.fillStyle = RB_RED; ctx.fillRect(Math.min(xa, xb), y - 0.009 * ppm, Math.abs(xb - xa), 0.018 * ppm);
     }
-    // BYBIT on the chassis side behind the front wheel
-    { const [x, y] = P(Z.fromFA(0.63), 0.50); text(ctx, 'BYBIT', x, y, 0.062 * ppm, '#ffffff', { stretch: 1.05 }); }
-    // ROKT on the cockpit side
-    { const [x, y] = P(Z.fromFA(1.66), 0.585); text(ctx, 'ROKT', x, y, 0.04 * ppm, '#ffffff'); }
-    // ORACLE across the sidepod / floor side
-    { const [x, y] = P(Z.fromFA(1.80), 0.455); text(ctx, 'ORACLE', x, y, 0.14 * ppm, '#ffffff', { font: '700', family: 'Helvetica Neue, Arial, sans-serif', stretch: 1.45 }); }
-    // Red Bull (red) on the engine cover side
-    { const [x, y] = P(Z.fromFA(2.52), 0.545); text(ctx, 'Red Bull', x, y, 0.085 * ppm, RB_RED, { font: '900', stretch: 1.0 }); }
-    // HONDA
-    { const [x, y] = P(Z.fromFA(3.12), 0.565); text(ctx, 'HONDA', x, y, 0.045 * ppm, '#ffffff', { stretch: 1.3 }); }
-    // RAUCH oval on the floor's leading side
-    {
-      const [x, y] = P(Z.fromFA(0.74), 0.12);
-      ctx.fillStyle = RB_YELLOW; ctx.beginPath(); ctx.ellipse(x, y, 0.15 * ppm, 0.045 * ppm, 0, 0, Math.PI * 2); ctx.fill();
-      text(ctx, 'RAUCH', x, y, 0.036 * ppm, RB_RED);
-    }
+    // (sponsor wordmarks are sharp conformal decals: see carmodel.js / decals.js)
     // airbox & engine cover upper: yellow sun -> orange -> red bull -> navy
     {
       const [xa] = P(Z.fromFA(1.74), 0), [xb] = P(Z.fromFA(3.0), 0);

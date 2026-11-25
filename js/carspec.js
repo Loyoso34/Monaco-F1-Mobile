@@ -82,7 +82,9 @@ export const WHEELS = [
 // T-cam (default view) and driver-eye positions, same frame.
 export const CAMERA_MOUNTS = {
   tcam: { x: 0, y: SPEC.tcamHeight, z: Z.fromFA(SPEC.tcamFA), pitchDeg: -6.5, vfov16x9: 54 },
-  cockpit: { x: 0, y: 0.735, z: Z.fromFA(1.50), pitchDeg: -3.5, vfov16x9: 50 },
+  // driver's eye at the visor: the steering wheel's LEDs, display and the gloves sit in the
+  // lower part of the frame, the halo pillar in the middle, as in helmet-camera footage
+  cockpit: { x: 0, y: 0.700, z: Z.fromFA(1.47), pitchDeg: -7.5, vfov16x9: 56 },
 };
 
 // Collision geometry: circles in the ground plane (x, z, radius) at the car's real

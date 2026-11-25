@@ -20,6 +20,11 @@ class Builder {
     this.tri(a, b, c, col, col, cb, uvs[0], uvs[1], uvs[2]);
     this.tri(b, d, c, col, cb, cb, uvs[1], uvs[3], uvs[2]);
   }
+  // quad with one colour per corner (lateral gradients)
+  quad4(a, b, c, d, ca, cb, cc, cd, uvs) {
+    this.tri(a, b, c, ca, cb, cc, uvs[0], uvs[1], uvs[2]);
+    this.tri(b, d, c, cb, cd, cc, uvs[1], uvs[3], uvs[2]);
+  }
   get empty() { return this.p.length === 0; }
   geometry() {
     const g = new THREE.BufferGeometry();
@@ -34,7 +39,7 @@ class Builder {
 
 const C = {
   asphalt: [0.36, 0.36, 0.38], rubber: [0.22, 0.22, 0.24], white: [0.92, 0.92, 0.9],
-  red: [0.78, 0.1, 0.1], runoff: [0.40, 0.41, 0.43], walk: [0.70, 0.68, 0.64], walkEdge: [0.78, 0.76, 0.72],
+  red: [0.66, 0.045, 0.04], runoff: [0.40, 0.41, 0.43], walk: [0.70, 0.68, 0.64], walkEdge: [0.78, 0.76, 0.72],
   pit: [0.30, 0.30, 0.32], green: [0.24, 0.42, 0.25], blueLine: [0.2, 0.4, 0.8],
 };
 const mul = (c, f) => [c[0] * f, c[1] * f, c[2] * f];
@@ -56,13 +61,41 @@ function barrierType(T, s, side) {
 
 export function buildTrackMeshes(T, { racingLine = null, quality = 'high', corridor = null } = {}) {
   const group = new THREE.Group(); group.name = 'track';
+  const asph = TX.asphaltSet(quality === 'low' ? 512 : 1024);
   const tex = {
-    asphalt: TX.asphalt(quality === 'low' ? 256 : 512), armco: TX.armco(), ads: TX.adWall(), tecpro: TX.tecpro(),
+    asphalt: asph.map, asphaltN: asph.normalMap, asphaltR: asph.roughnessMap, macro: TX.macroNoise(256), roadAtlas: TX.roadDetailAtlas(),
+    paint: TX.roadPaint(quality === 'low' ? 256 : 512),
+    armco: TX.armco(), ads: TX.adWall(), tecpro: TX.tecpro(),
     fence: TX.fence(), concrete: TX.concrete(), markers: TX.markerBoards(), barrier: TX.barrierAtlas(),
   };
+  // Large-scale variation (40 m) multiplied into the asphalt so the 3 m tile never repeats
+  // visibly (patchy wear, darker / lighter laid sections).
+  const withMacro = (mat, amt = [0.82, 1.14]) => {
+    mat.onBeforeCompile = (sh) => {
+      sh.uniforms.macroMap = { value: tex.macro };
+      sh.fragmentShader = sh.fragmentShader
+        .replace('void main() {', 'uniform sampler2D macroMap;\nvoid main() {')
+        .replace('#include <map_fragment>', `#include <map_fragment>
+          { float mac = texture2D(macroMap, vMapUv * 0.075).r * 0.65 + texture2D(macroMap, vMapUv * 0.31 + 0.37).r * 0.35;
+            diffuseColor.rgb *= mix(${amt[0].toFixed(2)}, ${amt[1].toFixed(2)}, mac); }`);
+    };
+    mat.customProgramCacheKey = () => 'macro' + amt.join();
+    return mat;
+  };
+  const lo = quality === 'low';
   const M = {
-    ground: new THREE.MeshLambertMaterial({ map: tex.asphalt, vertexColors: true }),
-    tunnelGround: new THREE.MeshBasicMaterial({ map: tex.asphalt, vertexColors: true }),
+    // PBR asphalt: high roughness (no gloss), stone relief normal map, polished-stone roughness
+    ground: withMacro(lo
+      ? new THREE.MeshLambertMaterial({ map: tex.asphalt, vertexColors: true })
+      : new THREE.MeshStandardMaterial({ map: tex.asphalt, normalMap: tex.asphaltN, normalScale: new THREE.Vector2(0.55, 0.55), roughnessMap: tex.asphaltR, roughness: 1.0, metalness: 0.0, vertexColors: true, envMapIntensity: 0.35 })),
+    // tunnel floor: baked light (vertex colours) on an unlit material; the factor carries the
+    // LED luminaire level onto the dark PBR asphalt albedo (same apparent grey as in daylight)
+    tunnelGround: withMacro(new THREE.MeshBasicMaterial({ map: tex.asphalt, vertexColors: true, color: new THREE.Color(3.4, 3.4, 3.4) })),
+    // painted kerbs and lines: smoother than the asphalt, keeping some of its relief
+    paint: lo
+      ? new THREE.MeshLambertMaterial({ map: tex.paint, vertexColors: true })
+      : new THREE.MeshStandardMaterial({ map: tex.paint, normalMap: tex.asphaltN, normalScale: new THREE.Vector2(0.3, 0.3), roughness: 0.6, metalness: 0, vertexColors: true, envMapIntensity: 0.35 }),
+    roadDetail: new THREE.MeshStandardMaterial({ map: tex.roadAtlas, transparent: true, depthWrite: false, vertexColors: true, roughness: 0.8, metalness: 0, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -4 }),
     barrier: new THREE.MeshLambertMaterial({ map: tex.barrier, vertexColors: true }),
     tunnelWall: new THREE.MeshBasicMaterial({ map: tex.barrier, vertexColors: true }),
     tunnelRoof: new THREE.MeshBasicMaterial({ map: tex.concrete, vertexColors: true }),
@@ -90,7 +123,7 @@ export function buildTrackMeshes(T, { racingLine = null, quality = 'high', corri
   }
   const nChunks = Math.ceil(L / CHUNK);
   const chunks = [];
-  for (let i = 0; i < nChunks; i++) chunks.push({ ground: new Builder(), tground: new Builder(), barrier: new Builder(), twall: new Builder(), roof: new Builder(), shell: new Builder(), fence: new Builder() });
+  for (let i = 0; i < nChunks; i++) chunks.push({ ground: new Builder(), paint: new Builder(), tground: new Builder(), barrier: new Builder(), twall: new Builder(), roof: new Builder(), shell: new Builder(), fence: new Builder() });
   const chunkOf = (s) => chunks[Math.min(nChunks - 1, Math.floor(T.wrapS(s) / CHUNK))];
 
   // ---------------------------------------------------------------------------------------------
@@ -121,29 +154,44 @@ export function buildTrackMeshes(T, { racingLine = null, quality = 'high', corri
     const inTun = T.inTunnel((s0 + s1) / 2);
     const ch = chunkOf(s0);
     const G = inTun ? ch.tground : ch.ground;
+    const GP = inTun ? ch.tground : ch.paint;          // kerbs and lines (painted)
     // tunnel: baked light from the two luminaire rows (near-uniform, brighter threshold zone)
     const lampF = (s) => inTun ? tunnelLight(s, 0, 0) : 1;
     const fa = lampF(s0), fb = lampF(s1);
     const uvq = (d0, d1) => [[d0 / 3, s0 / 3], [d1 / 3, s0 / 3], [d0 / 3, s1 / 3], [d1 / 3, s1 / 3]];
-    const band = (d0a, d1a, d0b, d1b, col, dy0 = 0, dy1 = 0, colB = null) => {
+    const band = (d0a, d1a, d0b, d1b, col, dy0 = 0, dy1 = 0, colB = null, Bld = G) => {
       const a = P(s0, d0a, dy0), b = P(s0, d1a, dy1), c = P(s1, d0b, dy0), d = P(s1, d1b, dy1);
-      G.quad(a, b, c, d, mul(col, fa), uvq(d0a, d1a), mul(colB || col, fb));
+      Bld.quad(a, b, c, d, mul(col, fa), uvq(d0a, d1a), mul(colB || col, fb));
     };
-    // road surface: split at the racing line so the rubbered line is darker
+    // road surface: rubber laid along the racing line by the tyres (two soft bands at the
+    // tyre tracks, merged by line-to-line variation, lighter under the car), plus the white
+    // edge lines. Colours vary per vertex across the road, so there are no hard steps.
     const lineD0 = rl ? rl.d[T.idxOfS(s0)] : 0, lineD1 = rl ? rl.d[T.idxOfS(s1)] : 0;
-    const roadCuts = (S) => {
-      const ld = S === A ? lineD0 : lineD1;
-      const pts = [S.hw, S.hw - 0.12, Math.min(S.hw - 0.2, ld + 1.1), Math.min(S.hw - 0.25, ld + 0.45), Math.max(-S.hw + 0.25, ld - 0.45), Math.max(-S.hw + 0.2, ld - 1.1), -S.hw + 0.12, -S.hw];
+    const rubberAt = (dd) => {
+      const g = (x0, sg) => Math.exp(-((dd - x0) * (dd - x0)) / (2 * sg * sg));
+      return Math.min(1, 0.85 * (g(0.8, 0.42) + g(-0.8, 0.42)) + 0.32 * g(0, 1.5));
+    };
+    const roadCol = (dd, f) => { const k = 1 - 0.36 * rubberAt(dd); return [C.asphalt[0] * k * f, C.asphalt[1] * k * f, C.asphalt[2] * k * f]; };
+    const OFFS = [2.6, 1.7, 1.25, 0.9, 0.55, 0.25, 0, -0.25, -0.55, -0.9, -1.25, -1.7, -2.6];
+    const roadCuts = (S, ld) => {
+      const pts = [S.hw, S.hw - 0.12];
+      for (const o of OFFS) pts.push(Math.max(-S.hw + 0.12, Math.min(S.hw - 0.12, ld + o)));
+      pts.push(-S.hw + 0.12, -S.hw);
       for (let i = 1; i < pts.length; i++) pts[i] = Math.min(pts[i], pts[i - 1]);
       return pts;
     };
-    const ra = roadCuts(A), rb = roadCuts(B);
-    const roadCols = [C.white, C.asphalt, mul(C.asphalt, 0.85), C.rubber, mul(C.asphalt, 0.85), C.asphalt, C.white];
-    for (let i = 0; i < 7; i++) band(ra[i], ra[i + 1], rb[i], rb[i + 1], roadCols[i]);
+    const ra = roadCuts(A, lineD0), rb = roadCuts(B, lineD1);
+    band(ra[0], ra[1], rb[0], rb[1], C.white, 0, 0, null, GP);
+    band(ra[ra.length - 2], ra[ra.length - 1], rb[rb.length - 2], rb[rb.length - 1], C.white, 0, 0, null, GP);
+    for (let i = 1; i < ra.length - 2; i++) {
+      if (ra[i] - ra[i + 1] < 1e-4 && rb[i] - rb[i + 1] < 1e-4) continue;
+      const a = P(s0, ra[i]), b = P(s0, ra[i + 1]), c = P(s1, rb[i]), d = P(s1, rb[i + 1]);
+      G.quad4(a, b, c, d, roadCol(ra[i] - lineD0, fa), roadCol(ra[i + 1] - lineD0, fa), roadCol(rb[i] - lineD1, fb), roadCol(rb[i + 1] - lineD1, fb), uvq(ra[i], ra[i + 1]));
+    }
     // kerbs: red/white 1 m stripes, slightly raised in the middle
     const stripe = (Math.floor(s0) % 2) ? C.red : C.white;
-    if (A.cl > 0.05 || B.cl > 0.05) band(A.hw + A.cl, A.hw, B.hw + B.cl, B.hw, stripe, 0.0, 0.0);
-    if (A.cr > 0.05 || B.cr > 0.05) band(-A.hw, -A.hw - A.cr, -B.hw, -B.hw - B.cr, stripe, 0.0, 0.0);
+    if (A.cl > 0.05 || B.cl > 0.05) band(A.hw + A.cl, A.hw, B.hw + B.cl, B.hw, stripe, 0.0, 0.0, null, GP);
+    if (A.cr > 0.05 || B.cr > 0.05) band(-A.hw, -A.hw - A.cr, -B.hw, -B.hw - B.cr, stripe, 0.0, 0.0, null, GP);
     // run-off to the barriers
     band(A.bl, A.hw + A.cl, B.bl, B.hw + B.cl, C.runoff);
     band(-A.hw - A.cr, -A.br, -B.hw - B.cr, -B.br, C.runoff);
@@ -176,7 +224,7 @@ export function buildTrackMeshes(T, { racingLine = null, quality = 'high', corri
   {
     const ch = chunkOf(0);
     const hw = T.sample(T.halfW, 0);
-    const G = ch.ground;
+    const G = ch.paint;
     const sq = 0.5;
     for (let i = 0; i < Math.round(2 * hw / sq); i++) {
       const d0 = hw - i * sq, d1 = d0 - sq;
@@ -184,16 +232,122 @@ export function buildTrackMeshes(T, { racingLine = null, quality = 'high', corri
         const col = (i + j) % 2 ? [0.05, 0.05, 0.05] : C.white;
         const sA = -0.6 + j * 0.6, sB = sA + 0.6;
         const a = P(sA, d0, 0.004), b = P(sA, d1, 0.004), c = P(sB, d0, 0.004), d = P(sB, d1, 0.004);
-        G.quad(a, b, c, d, col, [[0, 0], [0, 0], [0, 0], [0, 0]]);
+        G.quad(a, b, c, d, col, [[d0 / 3, sA / 3], [d1 / 3, sA / 3], [d0 / 3, sB / 3], [d1 / 3, sB / 3]]);
       }
     }
     // grid slots (staggered) behind the line
     for (let g = 0; g < 10; g++) {
       const sg = -8 - g * 8, dd = g % 2 ? -2.4 : 2.4;
       const s = T.wrapS(sg);
-      const G2 = chunkOf(s).ground;
+      const G2 = chunkOf(s).paint;
       const a = P(s, dd + 1.0, 0.004), b = P(s, dd - 1.0, 0.004), c = P(s + 0.25, dd + 1.0, 0.004), d = P(s + 0.25, dd - 1.0, 0.004);
-      G2.quad(a, b, c, d, C.white, [[0, 0], [0, 0], [0, 0], [0, 0]]);
+      G2.quad(a, b, c, d, C.white, [[(dd + 1) / 3, s / 3], [(dd - 1) / 3, s / 3], [(dd + 1) / 3, (s + 0.25) / 3], [(dd - 1) / 3, (s + 0.25) / 3]]);
+    }
+  }
+
+  // ---------------------------------------------------------------------------------------------
+  // Road details: rubber laid by braking (front tyres) and traction (rear tyres) along the racing
+  // line, lock-up flat-spot marks at the end of the heavy stops, resurfaced patches, sealed
+  // seams, manhole covers and gutter grates. One RGBA-coloured overlay mesh per ~600 m.
+  if (rl && rl.vmax) {
+    const A = TX.ROAD_ATLAS;
+    const rand = (() => { let q = 9137; return () => ((q = (q * 1664525 + 1013904223) >>> 0) / 4294967296); })();
+    const groups = [];
+    const GROUP = 600;
+    const grp = (s) => { const i = Math.floor(T.wrapS(s) / GROUP); return groups[i] || (groups[i] = { p: [], c: [], uv: [] }); };
+    const pushQuad = (g, a, b, c, d, ua, ub, uc, ud, ca, cb, cc, cd) => {
+      for (const [P, U, Cc] of [[a, ua, ca], [b, ub, cb], [c, uc, cc], [b, ub, cb], [d, ud, cd], [c, uc, cc]]) { g.p.push(...P); g.uv.push(...U); g.c.push(...Cc); }
+    };
+    const LIFT = 0.006;
+    // strip along the lap at lateral offset dOf(s) (function), width w, region of the atlas
+    // repeated every rep metres along the strip, alpha alpha(t) over the strip (t 0..1)
+    const strip = (sA, sB, dOf, w, region, rep, alpha, rgb = [1, 1, 1]) => {
+      const len = T.deltaS(sA, sB);
+      if (len <= 0.5) return;
+      const [u0, v0, u1, v1] = A[region];
+      const n = Math.max(1, Math.ceil(len / 1.5));
+      for (let i = 0; i < n; i++) {
+        const t0 = i / n, t1 = (i + 1) / n, sa = sA + len * t0, sb = sA + len * t1;
+        // u restarts each rep metres: split a segment that crosses a repeat boundary
+        const f0 = ((len * t0) / rep) % 1, f1raw = (len * t1) / rep;
+        const f1 = f1raw - Math.floor((len * t0) / rep);
+        if (f1 > 1.0001) continue;                  // tiny gap at the repeat boundary
+        const ua = u0 + (u1 - u0) * f0, ub = u0 + (u1 - u0) * Math.min(1, f1);
+        const da = dOf(sa), db = dOf(sb);
+        const p0 = P(sa, da + w / 2, LIFT), p1 = P(sa, da - w / 2, LIFT), p2 = P(sb, db + w / 2, LIFT), p3 = P(sb, db - w / 2, LIFT);
+        const aA = alpha(t0), aB = alpha(t1);
+        pushQuad(grp(sa), p0, p1, p2, p3, [ua, v1], [ua, v0], [ub, v1], [ub, v0], [...rgb, aA], [...rgb, aA], [...rgb, aB], [...rgb, aB]);
+      }
+    };
+    const sprite = (sc, dc, along, across, ang, region, a = 1, rgb = [1, 1, 1]) => {
+      const [u0, v0, u1, v1] = A[region];
+      const ca = Math.cos(ang), sa = Math.sin(ang);
+      const corner = (x, y) => { const ds = x * ca - y * sa, dd = x * sa + y * ca; return P(sc + ds, dc + dd, LIFT + 0.001); };
+      const hl = along / 2, hc = across / 2, c4 = [...rgb, a];
+      pushQuad(grp(sc), corner(-hl, hc), corner(-hl, -hc), corner(hl, hc), corner(hl, -hc), [u0, v1], [u0, v0], [u1, v1], [u1, v0], c4, c4, c4, c4);
+    };
+    const v = rl.vmax, Nn = T.N, ds = T.ds;
+    const dAt = (s) => rl.d[T.idxOfS(s)];
+    // braking zones and exits from the speed profile
+    const zones = [];
+    for (let k = 0; k < Nn; k++) {
+      const dec = v[k] - v[(k + 1) % Nn];
+      if (dec > 0.035 && !(zones.length && zones[zones.length - 1].end === k - 1)) zones.push({ start: k, end: k });
+      else if (dec > 0.035) zones[zones.length - 1].end = k;
+    }
+    for (const z of zones) {
+      const sA = z.start * ds, sB = z.end * ds, len = sB - sA;
+      if (len < 25 || T.inTunnel(sA)) continue;
+      const heavy = (v[z.start] - v[z.end]) / Math.max(1, v[z.start]);
+      // front tyres (track 1.68 m): darker towards the corner where the load is lowest
+      for (const off of [0.83, -0.83]) for (const [j, w, ph] of [[-0.07, 0.42, 0], [0.09, 0.36, 2.1]]) {
+        strip(sA + len * (0.30 + 0.08 * rand()), sB, (s) => dAt(s) + off + j + 0.035 * Math.sin(s * 0.13 + ph), w, 'streak', 13 + 4 * rand(), (t) => Math.min(0.9, (0.25 + 0.75 * t) * (0.55 + heavy)));
+      }
+      // lock-up flat spots near the end of heavy stops
+      if (heavy > 0.45) {
+        const nLock = 1 + Math.floor(rand() * 3);
+        for (let i = 0; i < nLock; i++) {
+          const sc = sB - 4 - rand() * len * 0.3, off = rand() < 0.5 ? 0.83 : -0.83;
+          sprite(sc, dAt(sc) + off, 3 + rand() * 4, 0.32, (rand() - 0.5) * 0.05, 'lock', 0.85);
+        }
+      }
+      // exit: rear tyres (track 1.60 m) laying rubber under traction after the apex
+      let kx = z.end, kMax = z.end + 80;
+      while (kx < kMax && v[(kx + 1) % Nn] >= v[kx % Nn] - 1e-3 && v[kx % Nn] < v[z.end] * 1.45) kx++;
+      const eA = z.end * ds + 2, eB = kx * ds;
+      if (eB - eA > 8 && !T.inTunnel(eA)) for (const off of [0.80, -0.80]) strip(eA, eB, (s) => dAt(s) + off, 0.44, 'streak', 16, (t) => 0.8 * (1 - t) * (1 - t));
+    }
+    // resurfaced patches, seams, manholes and gutter grates (not on the grid / in the tunnel)
+    const okHere = (s) => !T.inTunnel(s) && !(s > T.L - 100 || s < 8);
+    for (let i = 0; i < 140; i++) {
+      const sc = rand() * T.L; if (!okHere(sc)) continue;
+      const hw = T.sample(T.halfW, sc);
+      const crack = rand() < 0.4;
+      const along = crack ? 2.5 + rand() * 3 : 1.4 + rand() * 4.6, across = crack ? 1.4 + rand() * 1.6 : 0.9 + rand() * 2.2;
+      const dc = (rand() * 2 - 1) * Math.max(0, hw - across / 2 - 0.3);
+      sprite(sc, dc, along, across, crack ? (rand() - 0.5) * 0.5 : (rand() - 0.5) * 0.04, crack ? 'patchB' : 'patchA', crack ? 0.8 : 1);
+    }
+    for (let i = 0; i < 26; i++) {
+      const sc = rand() * T.L; if (!okHere(sc)) continue;
+      const hw = T.sample(T.halfW, sc), side = rand() < 0.5 ? 1 : -1, sl = 25 + rand() * 60;
+      strip(sc, sc + sl, () => side * (hw - 1.4 - rand() * 0.001), 0.10, 'seam', 9, () => 0.8);
+      if (rand() < 0.5) { const hw2 = T.sample(T.halfW, sc + sl * 0.5); sprite(sc + sl * 0.5, 0, 0.1, hw2 * 2 - 0.4, 0.02, 'seam', 0.7); }
+    }
+    for (let i = 0; i < 46; i++) {
+      const sc = rand() * T.L; if (!okHere(sc)) continue;
+      const hw = T.sample(T.halfW, sc), side = rand() < 0.5 ? 1 : -1;
+      if (rand() < 0.55) sprite(sc, side * (hw - 0.9 - rand() * 1.2), 0.68, 0.68, rand() * 3, 'manhole', 1);
+      else sprite(sc, side * (hw - 0.26), 0.82, 0.42, 0, 'grate', 1);
+    }
+    for (const g of groups) {
+      if (!g || !g.p.length) continue;
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.Float32BufferAttribute(g.p, 3));
+      geo.setAttribute('uv', new THREE.Float32BufferAttribute(g.uv, 2));
+      geo.setAttribute('color', new THREE.Float32BufferAttribute(g.c, 4));
+      geo.computeVertexNormals();
+      const m = new THREE.Mesh(geo, M.roadDetail); m.name = 'roadDetail'; m.matrixAutoUpdate = false; m.renderOrder = 1;
+      group.add(m);
     }
   }
 
@@ -429,6 +583,7 @@ export function buildTrackMeshes(T, { racingLine = null, quality = 'high', corri
       return m;
     };
     add(ch.ground, M.ground, { receive: true, name: 'ground' });
+    add(ch.paint, M.paint, { receive: true, name: 'roadPaint' });
     add(ch.tground, M.tunnelGround, { name: 'tunnelGround' });
     add(ch.barrier, M.barrier, { receive: true, name: 'barriers' });
     add(ch.twall, M.tunnelWall, { name: 'tunnelWall' });

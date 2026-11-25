@@ -12,41 +12,14 @@ const DEBUG = {
 };
 
 // ---------------------------------------------------------------------------------------------
-// Loading screen: corner view + name + location on the circuit outline, real progress.
+// Loading screen: brand sequence (CSS), real progress on a hairline bar.
 const track = buildTrack();
-const LOAD_CORNERS = [
-  { id: 'ste-devote', img: 'corner-ste-devote' }, { id: 'casino', img: 'corner-casino' },
-  { id: 'hairpin', img: 'corner-hairpin' }, { id: 'tunnel', img: 'corner-tunnel' }, { id: 'pool1', img: 'corner-pool' },
-];
-function drawOutline(svg, highlightS) {
-  let minx = 1e9, maxx = -1e9, minz = 1e9, maxz = -1e9;
-  for (let k = 0; k < track.N; k += 4) { minx = Math.min(minx, track.px[k]); maxx = Math.max(maxx, track.px[k]); minz = Math.min(minz, track.pz[k]); maxz = Math.max(maxz, track.pz[k]); }
-  const sc = 88 / Math.max(maxx - minx, maxz - minz), ox = 50 - (minx + maxx) / 2 * sc, oz = 50 - (minz + maxz) / 2 * sc;
-  let d = '';
-  for (let k = 0; k <= track.N; k += 6) { const i = k % track.N; d += (k ? 'L' : 'M') + (track.px[i] * sc + ox).toFixed(1) + ' ' + (track.pz[i] * sc + oz).toFixed(1); }
-  const k = track.idxOfS(highlightS);
-  const cx = (track.px[k] * sc + ox).toFixed(1), cy = (track.pz[k] * sc + oz).toFixed(1);
-  const sf = track.idxOfS(0);
-  svg.innerHTML = `<path d="${d}Z" fill="none" stroke="rgba(255,255,255,0.85)" stroke-width="2.2" stroke-linejoin="round"/>` +
-    `<rect x="${(track.px[sf] * sc + ox - 3).toFixed(1)}" y="${(track.pz[sf] * sc + oz - 1).toFixed(1)}" width="6" height="2" fill="#fff"/>` +
-    `<circle cx="${cx}" cy="${cy}" r="5.5" fill="#ffc20e" stroke="#0b1220" stroke-width="1.5"/>`;
-}
-let loadCornerIdx = 0;
-function showLoadCorner() {
-  const lc = LOAD_CORNERS[loadCornerIdx % LOAD_CORNERS.length];
-  const c = track.corners.find(cc => cc.id === lc.id);
-  $('loadCorner').style.backgroundImage = `url("./assets/${lc.img}.webp")`;
-  $('loadCornerName').textContent = `${c.name} · ${c.turn}`;
-  drawOutline($('loadMap'), c.s);
-  loadCornerIdx++;
-}
-showLoadCorner();
-const loadTimer = setInterval(showLoadCorner, 2600);
 let progress = 0;
 function setProgress(p, label) {
   progress = Math.max(progress, p);
   $('loadBar').style.width = (progress * 100).toFixed(0) + '%';
-  $('loadPct').textContent = (label || 'Loading…') + ' ' + Math.round(progress * 100) + '%';
+  $('loadPct').textContent = Math.round(progress * 100) + '%';
+  if (label) $('ldStatus').textContent = label.replace(/…$/, '');
 }
 const nextFrame = () => new Promise(r => requestAnimationFrame(() => setTimeout(r, 0)));
 
@@ -69,13 +42,6 @@ function unlockAudio() {
 window.addEventListener('pointerdown', unlockAudio, { passive: true });
 window.addEventListener('touchend', unlockAudio, { passive: true });
 
-// "Drive" may be tapped on the loading screen: the run starts the moment loading finishes.
-let driveQueued = false;
-const loadDrive = document.createElement('button');
-loadDrive.className = 'big primary'; loadDrive.textContent = 'Drive'; loadDrive.id = 'loadDrive';
-loadDrive.style.cssText = 'position:absolute;z-index:3;right:calc(var(--sa-r) + 28px);top:calc(var(--sa-t) + 22px);width:auto;padding:14px 30px;font-size:20px';
-$('loading').appendChild(loadDrive);
-
 // ---------------------------------------------------------------------------------------------
 let THREE, App;
 async function boot() {
@@ -86,13 +52,14 @@ async function boot() {
     import('./carmodel.js'), import('./carspec.js'), import('./physics.js'), import('./autopilot.js'),
   ]);
   setProgress(0.40, 'Loading circuit…');
-  const [trackmesh, scenery, corridor, cameras, controls, timing, hud, fx, audio, perf, env] = await Promise.all([
+  const [trackmesh, scenery, corridor, cameras, controls, timing, hud, fx, audio, perf, env, mirrors] = await Promise.all([
     import('./trackmesh.js'), import('./scenery.js'), import('./corridor.js'), import('./cameras.js'), import('./controls.js'), import('./timing.js'),
     import('./hud.js'), import('./fx.js'), import('./audio.js'), import('./perf.js'), import('three/addons/RoomEnvironment.js'),
+    import('./mirrors.js'),
   ]);
   setProgress(0.48, 'Building circuit…');
   await nextFrame();
-  App = await setup({ carmodel, carspec, physics, autopilot, trackmesh, scenery, corridor, cameras, controls, timing, hud, fx, audio, perf, env });
+  App = await setup({ carmodel, carspec, physics, autopilot, trackmesh, scenery, corridor, cameras, controls, timing, hud, fx, audio, perf, env, mirrors });
 }
 
 async function setup(M) {
@@ -145,6 +112,9 @@ async function setup(M) {
   setProgress(0.82, 'Preparing the RB20…'); await nextFrame();
   const car = M.carmodel.createCar({ quality: tierName });
   scene.add(car.root);
+  // real-time planar reflections in both mirrors (resolution follows the graphics tier)
+  const mirrors = new M.mirrors.Mirrors(renderer, scene, car.root, tierName);
+  perf.onTier = (t) => mirrors.setTier(t);
   const veh = new M.physics.Vehicle(track, { assists: settings.assists });
   setProgress(0.90, 'Compiling shaders…'); await nextFrame();
   // place a camera near the start for the shader warm-up
@@ -163,7 +133,7 @@ async function setup(M) {
   const auto = new M.autopilot.Autopilot(track, racingLine, { pace: 0.92 });
 
   const app = {
-    THREE, M, renderer, scene, camera, sun, hemi, perf, track, tm, sc, car, veh, rig, controls, timing, hud, fx, audio, auto,
+    THREE, M, renderer, scene, camera, sun, hemi, perf, track, tm, sc, car, veh, rig, controls, timing, hud, fx, audio, auto, mirrors,
     state: 'loading', simTime: 0, acc: 0, crashT: 0, exposure: 1, daylight: 1, lightS: null,
     lightCols: { sky: new THREE.Color(0xcfe2ff), ground: new THREE.Color(0x6b6356), lamp: new THREE.Color(0xffe2bd), floor: new THREE.Color(0x3a3733) },
     cine: { idx: -1, t: 0 }, lastFrame: performance.now(), fpsShown: settings.showFps || DEBUG.fps,
@@ -216,7 +186,8 @@ function show(id, on) { $(id).classList.toggle('on', on); }
 
 function enterMenu(app) {
   app.state = 'menu';
-  show('loading', false); show('menu', true); show('hud', false); show('controls', false);
+  show('menu', true); show('hud', false); show('controls', false);
+  if (!$('loading').classList.contains('on')) $('menu').classList.add('in');
   show('pause', false); show('crash', false);
   app.controls.enabled = false; app.controls.clear();
   app.audio.setEngineOn(false);
@@ -228,7 +199,7 @@ function enterMenu(app) {
 
 function startDriving(app) {
   app.state = 'driving';
-  show('loading', false); show('menu', false); show('hud', true); show('controls', true); show('pause', false); show('crash', false);
+  show('menu', false); show('hud', true); show('controls', true); show('pause', false); show('crash', false);
   $('cineLabel').style.opacity = '0';
   quickRestart(app, true);
   app.controls.enabled = true;
@@ -309,6 +280,7 @@ function applyDamageVisuals(app, ev) {
   if (dm.health.rwL < 0.15 && dm.health.rwR < 0.15) { const rw = car.parts.rearWing; if (rw && rw.visible) det(rw); }
 }
 
+const STEER_RATIO = 4.4;
 function syncCarVisual(app) {
   const { car, veh } = app;
   car.root.position.set(veh.x, veh.y + veh.heave, veh.z);
@@ -319,8 +291,16 @@ function syncCarVisual(app) {
     wheelSpin: ws.map(w => w.spin),
     travel: ws.map(w => w.travel),
     pitch: veh.pitch, roll: veh.roll, heave: 0,
-    steeringWheel: veh.delta * 4.4,            // ~100 deg at the 23 deg Monaco lock
+    // F1 steering ratio ~4.4:1 -> ~100 deg at the steering wheel at the 23 deg Monaco lock
+    steeringWheel: veh.delta * STEER_RATIO,
     brakeLight: veh.harvest > 0.25 && (Math.floor(app.simTime * 8) % 2 === 0),
+    dash: {
+      dt: app.frameDt || 0.016, time: app.simTime + (app.cine ? app.cine.t : 0),
+      rpm: veh.rpm, kmh: Math.round(veh.speed * 3.6),
+      gear: veh.reverse ? 'R' : (veh.speed < 0.6 && veh.input.throttle < 0.05 ? 'N' : String(veh.gear)),
+      ers: veh.es / 4e6, bias: veh.bias || 0.57,
+      lock: veh.wheels.some(w => w.locked || w.spinning), limiter: veh.rpm > 12250,
+    },
   });
 }
 
@@ -328,6 +308,7 @@ function syncCarVisual(app) {
 function frame(app) {
   const now = performance.now();
   let dt = Math.min(0.05, (now - app.lastFrame) / 1000);
+  app.frameDt = dt;
   const dtMs = now - app.lastFrame;
   app.lastFrame = now;
   const { veh, car, rig, timing, hud, audio, controls, fx, track } = app;
@@ -368,6 +349,7 @@ function frame(app) {
       const k = 0.5; fx.sparksAt(veh.x - Math.sin(veh.psi) * -1.2, veh.y + 0.02, veh.z - Math.cos(veh.psi) * -1.2, veh.vx * k, veh.vz * k, 2);
     }
     syncCarVisual(app);
+    controls.setLock(veh.wheels[0].locked || veh.wheels[1].locked);
     timing.update(veh, app.simTime);
     for (const m of timing.messages) hud.message(m.text, m.kind, m.dur);
     timing.messages.length = 0;
@@ -398,7 +380,7 @@ function frame(app) {
   updateLighting(app, dt);
   app.sc.waterNormal.offset.x += dt * 0.004; app.sc.waterNormal.offset.y += dt * 0.0025;
   const tB = performance.now();
-  if (!DEBUG.norender) app.renderer.render(app.scene, app.camera);
+  if (!DEBUG.norender) { app.mirrors.update(app.camera); app.renderer.render(app.scene, app.camera); }
   const tC = performance.now();
   const st = app.stats || (app.stats = { simMs: 0, renderMs: 0, maxSimMs: 0 });
   st.simMs += (tB - tA - st.simMs) * 0.05; st.renderMs += (tC - tB - st.renderMs) * 0.05; st.maxSimMs = Math.max(st.maxSimMs * 0.999, tB - tA);
@@ -521,27 +503,25 @@ function openSettings(app) {
 }
 
 // ---------------------------------------------------------------------------------------------
-loadDrive.onclick = () => {
-  driveQueued = true;
-  loadDrive.textContent = 'Starting…';
-  if (App) { App.audio.start().catch(() => {}); }
-  else window.__audioWanted = true;
-};
 if ('serviceWorker' in navigator && location.protocol === 'https:') {
   navigator.serviceWorker.register('./sw.js').catch(() => {});
 }
 boot().then(() => {
   const app = App;
   window.__app = app;
-  clearInterval(loadTimer);
   bindUI(app);
   if (app.fpsShown) $('fps').style.display = 'block';
   setProgress(1, 'Ready');
   if (DEBUG.shot) { setupShot(app, DEBUG.shot); return; }
   app.lastFrame = performance.now();
-  if (driveQueued || DEBUG.start === 'drive') { startDriving(app); if (window.__audioWanted) app.audio.start().catch(() => {}); }
+  if (DEBUG.start === 'drive') startDriving(app);
   else enterMenu(app);
   requestAnimationFrame(() => frame(app));
+  // cinematic hand-over once the brand sequence has played (>= 2.7 s after the page started):
+  // the brand fades, the black lifts, the menu / car fades in
+  const handover = Math.max(450, 2700 - performance.now());
+  setTimeout(() => { $('loading').classList.add('out'); $('menu').classList.add('in'); }, handover);
+  setTimeout(() => show('loading', false), handover + 1050);
   window.__ready = true;
 }).catch((e) => {
   console.error(e);
@@ -551,6 +531,7 @@ boot().then(() => {
 // Debug helper used by tools/capture.mjs to render the loading image & corner thumbnails
 function setupShot(app, name) {
   show('loading', false); show('menu', false);
+  $('loading').classList.add('out');
   const { track, camera, veh, car } = app;
   const shots = {
     'loading': { corner: 'ste-devote', s: -62, d: 5.5, h: 7.5, look: [18, -2, 0.5], car: -18 },
@@ -577,6 +558,7 @@ function setupShot(app, name) {
   camera.lookAt(l.x, l.y + sh.look[2], l.z);
   camera.fov = 50; camera.updateProjectionMatrix();
   updateLighting(app, 0);
+  app.mirrors.update(camera); app.mirrors.update(camera);
   app.renderer.render(app.scene, camera);
   window.__ready = true;
 }

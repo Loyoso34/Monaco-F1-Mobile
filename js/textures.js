@@ -11,21 +11,220 @@ function tex(c, { repeat = true, srgb = true, aniso = 4 } = {}) {
   return t;
 }
 
-// Asphalt: fine aggregate noise, slight patches. Neutral grey (tinted by vertex colours).
-export function asphalt(size = 512) {
-  const c = canvas(size, size), x = c.getContext('2d');
-  const img = x.createImageData(size, size), r = rng(7);
-  for (let i = 0; i < size * size; i++) {
-    const n = 150 + (r() - 0.5) * 70 + (r() < 0.04 ? 40 : 0) - (r() < 0.03 ? 45 : 0);
-    img.data[i * 4] = img.data[i * 4 + 1] = n; img.data[i * 4 + 2] = n + 4; img.data[i * 4 + 3] = 255;
+// Road paint (kerbs, edge lines, start / finish, grid boxes), one tile = 3 m like the asphalt:
+// near-white paint film with pits where the aggregate shows through, rubber scuffs along the
+// direction of travel and soft wear. Tinted by vertex colours (red / white kerb stripes).
+export function roadPaint(size = 512) {
+  const N = size, r = rng(555);
+  const c = canvas(N, N), x = c.getContext('2d');
+  const img = x.createImageData(N, N);
+  for (let i = 0; i < N * N; i++) {
+    let v = 226 + (r() - 0.5) * 20;
+    if (r() < 0.05) v -= 55 + r() * 80;                // aggregate pits through the paint
+    img.data[i * 4] = img.data[i * 4 + 1] = v; img.data[i * 4 + 2] = v - 2; img.data[i * 4 + 3] = 255;
   }
   x.putImageData(img, 0, 0);
-  // soft patches / sealant lines
-  x.globalAlpha = 0.08;
-  for (let k = 0; k < 18; k++) { x.fillStyle = r() < 0.5 ? '#000' : '#fff'; x.beginPath(); x.ellipse(r() * size, r() * size, 20 + r() * 80, 10 + r() * 40, r() * 3, 0, 7); x.fill(); }
-  x.globalAlpha = 0.18; x.strokeStyle = '#111'; x.lineWidth = 2;
-  for (let k = 0; k < 5; k++) { x.beginPath(); x.moveTo(r() * size, 0); x.bezierCurveTo(r() * size, size * 0.3, r() * size, size * 0.7, r() * size, size); x.stroke(); }
+  const wrapRect = (rx, ry, rw, rh) => { x.fillRect(rx, ry, rw, rh); if (ry + rh > N) x.fillRect(rx, ry - N, rw, rh); if (rx + rw > N) x.fillRect(rx - N, ry, rw, rh); };
+  // rubber scuffs along the lap direction (v)
+  for (let k = 0; k < 170; k++) { x.fillStyle = `rgba(28,28,30,${0.03 + r() * 0.08})`; wrapRect(r() * N, r() * N, 1 + r() * 3, 20 + r() * 130); }
+  // soft wear / dirt
+  for (let k = 0; k < 14; k++) {
+    const gx = r() * N, gy = r() * N, rad = 30 + r() * 90;
+    for (const [ox, oy] of [[0, 0], [N, 0], [-N, 0], [0, N], [0, -N]]) {
+      const g = x.createRadialGradient(gx + ox, gy + oy, 0, gx + ox, gy + oy, rad);
+      g.addColorStop(0, 'rgba(70,70,72,0.10)'); g.addColorStop(1, 'rgba(70,70,72,0)');
+      x.fillStyle = g; x.fillRect(gx + ox - rad, gy + oy - rad, rad * 2, rad * 2);
+    }
+  }
   return tex(c, { aniso: 8 });
+}
+
+// Street-circuit asphalt (one tile = 3 m): dense aggregate (2-9 mm stones of several greys) in
+// a dark bitumen binder, fine sand, polished high spots; with a matching normal map (stone
+// relief) and roughness map (binder rougher, polished stone tops smoother). Neutral grey: the
+// road bands tint it with vertex colours.
+export function asphaltSet(size = 1024) {
+  const N = size, r = rng(1234);
+  const h = new Float32Array(N * N), col = new Float32Array(N * N), rough = new Float32Array(N * N);
+  // binder + sand
+  for (let i = 0; i < N * N; i++) { const n = r(); col[i] = 0.25 + n * 0.07; h[i] = n * 0.15; rough[i] = 0.95; }
+  // stones: soft-edged discs (wrap-around so the tile is seamless)
+  const px = N / 3;                                  // pixels per metre
+  const stones = Math.round(N * N * 0.0105);
+  for (let k = 0; k < stones; k++) {
+    const cx = r() * N, cy = r() * N;
+    const rad = (0.0012 + Math.pow(r(), 2.2) * 0.0036) * px;     // 2.4 - 9.6 mm diameter
+    const tone = r() < 0.16 ? 0.74 + r() * 0.16 : r() < 0.55 ? 0.50 + r() * 0.14 : 0.33 + r() * 0.10;
+    const polish = r() < 0.35;
+    const e = 0.75 + r() * 0.5;                      // elongation
+    const ang = r() * Math.PI;
+    const ca = Math.cos(ang), sa = Math.sin(ang);
+    const R = Math.ceil(rad * 1.6);
+    for (let dy = -R; dy <= R; dy++) for (let dx = -R; dx <= R; dx++) {
+      const u = (dx * ca + dy * sa) / (rad * e), v = (-dx * sa + dy * ca) / rad;
+      const d2 = u * u + v * v;
+      if (d2 > 1) continue;
+      const x = ((Math.floor(cx) + dx) % N + N) % N, y = ((Math.floor(cy) + dy) % N + N) % N, i = y * N + x;
+      const top = Math.sqrt(1 - d2);
+      col[i] = col[i] * (1 - top * 0.9) + tone * top * 0.9;
+      h[i] = Math.max(h[i], 0.25 + top * 0.75);
+      rough[i] = polish ? 0.62 + (1 - top) * 0.3 : 0.86;
+    }
+  }
+  // fine speckle and a little oil darkening
+  for (let i = 0; i < N * N; i++) { col[i] *= 0.94 + r() * 0.12; }
+  const mk = (fill) => { const c = canvas(N, N), x = c.getContext('2d'); const img = x.createImageData(N, N); fill(img.data); x.putImageData(img, 0, 0); return c; };
+  const mapC = mk((d) => { for (let i = 0; i < N * N; i++) { const v = Math.max(0, Math.min(255, col[i] * 255)); d[i * 4] = v; d[i * 4 + 1] = v; d[i * 4 + 2] = Math.min(255, v + 4); d[i * 4 + 3] = 255; } });
+  const nrmC = mk((d) => {
+    for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+      const i = y * N + x;
+      const dx = h[y * N + (x + 1) % N] - h[y * N + (x - 1 + N) % N];
+      const dy = h[((y + 1) % N) * N + x] - h[((y - 1 + N) % N) * N + x];
+      const nx = -dx * 1.6, ny = dy * 1.6, l = Math.hypot(nx, ny, 1);
+      d[i * 4] = (nx / l * 0.5 + 0.5) * 255; d[i * 4 + 1] = (ny / l * 0.5 + 0.5) * 255; d[i * 4 + 2] = (1 / l * 0.5 + 0.5) * 255; d[i * 4 + 3] = 255;
+    }
+  });
+  const roughC = mk((d) => { for (let i = 0; i < N * N; i++) { const v = rough[i] * 255; d[i * 4] = v; d[i * 4 + 1] = v; d[i * 4 + 2] = v; d[i * 4 + 3] = 255; } });
+  return { map: tex(mapC, { aniso: 16 }), normalMap: tex(nrmC, { srgb: false, aniso: 16 }), roughnessMap: tex(roughC, { srgb: false, aniso: 16 }) };
+}
+
+// Low-frequency tileable value noise (grey), used to break up texture repetition at a 40 m scale.
+export function macroNoise(size = 256) {
+  const c = canvas(size, size), x = c.getContext('2d');
+  const img = x.createImageData(size, size), r = rng(99);
+  const grid = (n) => { const g = new Float32Array(n * n); for (let i = 0; i < n * n; i++) g[i] = r(); return g; };
+  const octaves = [[4, 0.5], [8, 0.28], [16, 0.14], [32, 0.08]].map(([n, a]) => ({ n, a, g: grid(n) }));
+  const smooth = (t) => t * t * (3 - 2 * t);
+  for (let y = 0; y < size; y++) for (let xx = 0; xx < size; xx++) {
+    let v = 0;
+    for (const o of octaves) {
+      const fx = xx / size * o.n, fy = y / size * o.n, ix = Math.floor(fx), iy = Math.floor(fy), tx = smooth(fx - ix), ty = smooth(fy - iy);
+      const G = (a, b) => o.g[((b % o.n) * o.n) + (a % o.n)];
+      v += o.a * ((G(ix, iy) * (1 - tx) + G(ix + 1, iy) * tx) * (1 - ty) + (G(ix, iy + 1) * (1 - tx) + G(ix + 1, iy + 1) * tx) * ty);
+    }
+    const i = (y * size + xx) * 4, vv = Math.max(0, Math.min(255, v * 255));
+    img.data[i] = img.data[i + 1] = img.data[i + 2] = vv; img.data[i + 3] = 255;
+  }
+  x.putImageData(img, 0, 0);
+  return tex(c, { srgb: false, aniso: 4 });
+}
+
+// Road-detail atlas (1024 x 1024, RGBA, premultiplied look): rows of
+//   0: tyre streaks (rubber / braking) 1024 x 256 — long streak with broken texture
+//   1: asphalt patches (2 variants) 512 x 256 each — darker newer asphalt, ragged edges
+//   2: seam / crack sealant line 1024 x 128 and a manhole cover 256 + drain grate 256
+export const ROAD_ATLAS = {
+  streak: [0, 0, 1, 0.25], patchA: [0, 0.25, 0.5, 0.5], patchB: [0.5, 0.25, 1, 0.5],
+  seam: [0, 0.5, 1, 0.625], manhole: [0, 0.625, 0.25, 0.875], grate: [0.25, 0.625, 0.5, 0.875], lock: [0.5, 0.625, 1, 0.875],
+};
+export function roadDetailAtlas() {
+  const S = 1024, c = canvas(S, S), x = c.getContext('2d'), r = rng(4321);
+  x.clearRect(0, 0, S, S);
+  // atlas rows use canvas y from the top: v (flipY) = 1 - y / S
+  const rect = (k) => { const [u0, v0, u1, v1] = ROAD_ATLAS[k]; return [u0 * S, (1 - v1) * S, (u1 - u0) * S, (v1 - v0) * S]; };
+  // tyre streak: dark rubber, density varying along the length, frayed edges
+  {
+    const [X, Y, W, H] = rect('streak');
+    const g = x.createLinearGradient(0, Y, 0, Y + H);
+    g.addColorStop(0, 'rgba(12,12,14,0)'); g.addColorStop(0.22, 'rgba(12,12,14,0.16)'); g.addColorStop(0.5, 'rgba(10,10,12,0.34)'); g.addColorStop(0.78, 'rgba(12,12,14,0.16)'); g.addColorStop(1, 'rgba(12,12,14,0)');
+    x.fillStyle = g; x.fillRect(X, Y, W, H);
+    // rubber grain: thin longitudinal scrubs, denser in the middle of the tyre path
+    for (let k = 0; k < 5200; k++) {
+      const t = r(), off = (r() + r() + r() - 1.5) / 1.5;      // ~triangular across the path
+      const yy = Y + H * (0.5 + off * 0.42);
+      x.fillStyle = `rgba(10,10,12,${(0.04 + r() * 0.10) * (1 - Math.abs(off) * 0.7)})`;
+      x.fillRect(X + t * W, yy, 6 + r() * 46, 0.6 + r() * 1.6);
+    }
+    // lighter gaps where the deposit is broken
+    for (let k = 0; k < 220; k++) { x.clearRect(X + r() * W, Y + H * (0.15 + r() * 0.7), 2 + r() * 10, 1 + r() * 2); }
+  }
+  // patch A: saw-cut repair of fresher, finer asphalt (slightly darker), bitumen-sealed joint
+  {
+    const [X, Y, W, H] = rect('patchA');
+    const pad = 10, x0 = X + pad, y0 = Y + pad, w = W - 2 * pad, h = H - 2 * pad;
+    x.fillStyle = 'rgba(22,22,25,0.30)'; x.fillRect(x0, y0, w, h);
+    for (let i = 0; i < 5200; i++) {
+      const v = 30 + r() * 70; x.fillStyle = `rgba(${v},${v},${v + 3},${0.10 + r() * 0.18})`;
+      x.fillRect(x0 + r() * w, y0 + r() * h, 1 + r() * 2, 1 + r() * 2);
+    }
+    // wear on the patch along the tyre paths (lighter)
+    x.fillStyle = 'rgba(120,120,124,0.06)'; x.fillRect(x0, y0 + h * 0.18, w, h * 0.16); x.fillRect(x0, y0 + h * 0.64, w, h * 0.16);
+    // sealant joint: slightly wavy black band over the saw cut, overbanded onto the old surface
+    x.lineJoin = 'round';
+    for (const [lw, a] of [[9, 0.28], [4, 0.75]]) {
+      x.strokeStyle = `rgba(8,8,10,${a})`; x.lineWidth = lw; x.beginPath();
+      const pts = [[x0, y0], [x0 + w, y0], [x0 + w, y0 + h], [x0, y0 + h]];
+      for (let k = 0; k <= 4; k++) {
+        const [ax, ay] = pts[k % 4], [bx, by] = pts[(k + 1) % 4];
+        for (let j = 0; j < 12; j++) { const t = j / 12, jx = (r() - 0.5) * 2.2, jy = (r() - 0.5) * 2.2; const px = ax + (bx - ax) * t + jx, py = ay + (by - ay) * t + jy; if (k === 0 && j === 0) x.moveTo(px, py); else x.lineTo(px, py); }
+      }
+      x.stroke();
+    }
+  }
+  // patch B: crack-sealed area ("tar snakes"): branching bitumen lines over a slightly lighter,
+  // older surface
+  {
+    const [X, Y, W, H] = rect('patchB');
+    x.save(); x.beginPath(); x.rect(X + 4, Y + 4, W - 8, H - 8); x.clip();
+    const fade = x.createRadialGradient(X + W / 2, Y + H / 2, 10, X + W / 2, Y + H / 2, W * 0.52);
+    fade.addColorStop(0, 'rgba(150,150,152,0.07)'); fade.addColorStop(1, 'rgba(150,150,152,0)');
+    x.fillStyle = fade; x.fillRect(X, Y, W, H);
+    const snake = (sx, sy, ang, len, wid, depth) => {
+      x.strokeStyle = 'rgba(6,6,8,0.82)'; x.lineWidth = wid; x.lineCap = 'round'; x.lineJoin = 'round';
+      x.beginPath(); x.moveTo(sx, sy);
+      let px = sx, py = sy, a = ang;
+      for (let k = 0; k < len; k++) {
+        a += (r() - 0.5) * 0.7; px += Math.cos(a) * 7; py += Math.sin(a) * 7; x.lineTo(px, py);
+        if (depth < 2 && r() < 0.05) { x.stroke(); snake(px, py, a + (r() < 0.5 ? 1 : -1) * (0.6 + r() * 0.6), Math.floor(len * 0.4), wid * 0.75, depth + 1); x.strokeStyle = 'rgba(6,6,8,0.82)'; x.lineWidth = wid; x.beginPath(); x.moveTo(px, py); }
+      }
+      x.stroke();
+    };
+    snake(X + 18, Y + H * 0.5, 0, 70, 4.5, 0);
+    snake(X + W * 0.3, Y + 14, Math.PI / 2, 30, 3.5, 1);
+    snake(X + W * 0.7, Y + H - 14, -Math.PI / 2, 28, 3.5, 1);
+    x.restore();
+  }
+  // seam: bitumen sealant line with a wobble
+  {
+    const [X, Y, W, H] = rect('seam');
+    x.strokeStyle = 'rgba(8,8,10,0.85)'; x.lineWidth = H * 0.22; x.lineCap = 'round';
+    x.beginPath(); x.moveTo(X, Y + H / 2);
+    for (let i = 1; i <= 40; i++) x.lineTo(X + W * i / 40, Y + H / 2 + (r() - 0.5) * H * 0.18);
+    x.stroke();
+    x.strokeStyle = 'rgba(8,8,10,0.35)'; x.lineWidth = H * 0.5; x.stroke();
+  }
+  // manhole cover: cast iron disc with a radial / ring pattern
+  {
+    const [X, Y, W, H] = rect('manhole');
+    const cx = X + W / 2, cy = Y + H / 2, R = W * 0.46;
+    x.fillStyle = 'rgba(48,49,52,1)'; x.beginPath(); x.arc(cx, cy, R, 0, Math.PI * 2); x.fill();
+    x.strokeStyle = 'rgba(90,92,96,1)'; x.lineWidth = 6; x.stroke();
+    x.strokeStyle = 'rgba(28,28,30,1)'; x.lineWidth = 3;
+    for (let k = 1; k <= 4; k++) { x.beginPath(); x.arc(cx, cy, R * k / 5, 0, Math.PI * 2); x.stroke(); }
+    for (let k = 0; k < 16; k++) { const a = k / 16 * Math.PI * 2; x.beginPath(); x.moveTo(cx + Math.cos(a) * R * 0.2, cy + Math.sin(a) * R * 0.2); x.lineTo(cx + Math.cos(a) * R * 0.95, cy + Math.sin(a) * R * 0.95); x.stroke(); }
+    x.fillStyle = 'rgba(70,72,76,1)'; x.font = `700 ${Math.round(W * 0.1)}px Arial`; x.textAlign = 'center'; x.textBaseline = 'middle'; x.fillText('MONACO', cx, cy);
+  }
+  // drain grate: slotted steel frame
+  {
+    const [X, Y, W, H] = rect('grate');
+    x.fillStyle = 'rgba(40,41,44,1)'; x.fillRect(X + W * 0.25, Y + H * 0.05, W * 0.5, H * 0.9);
+    x.fillStyle = 'rgba(8,8,9,1)';
+    for (let k = 0; k < 9; k++) x.fillRect(X + W * 0.29, Y + H * (0.1 + k * 0.095), W * 0.42, H * 0.05);
+    x.strokeStyle = 'rgba(96,98,102,1)'; x.lineWidth = 4; x.strokeRect(X + W * 0.25, Y + H * 0.05, W * 0.5, H * 0.9);
+  }
+  // lock-up flat-spot mark: short dense black smudge
+  {
+    const [X, Y, W, H] = rect('lock');
+    for (let k = 0; k < 1600; k++) {
+      const t = Math.pow(r(), 0.8); const yy = Y + H * (0.28 + r() * 0.44);
+      const a = (t < 0.06 ? t / 0.06 : 1 - (t - 0.06) / 0.94 * 0.85) * (0.12 + r() * 0.3);
+      x.fillStyle = `rgba(6,6,8,${a})`;
+      x.fillRect(X + t * W, yy, 6 + r() * 22, 1 + r() * 3);
+    }
+  }
+  const t = tex(c, { repeat: false, aniso: 8 });
+  t.wrapS = t.wrapT = THREE.ClampToEdgeWrapping;
+  return t;
 }
 
 // Armco guard-rail (W-beam x2) on posts, 4 m per tile, with occasional sponsor-free ad panels.

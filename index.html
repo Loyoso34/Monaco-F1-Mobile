@@ -6,14 +6,13 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="Monaco TT">
-<meta name="theme-color" content="#0b1220">
+<meta name="apple-mobile-web-app-title" content="F1-27">
+<meta name="theme-color" content="#050506">
 <meta name="description" content="Monaco time trial: drive a 2024 RB20 around the Circuit de Monaco on your phone.">
-<title>Monaco Time Trial</title>
+<title>F1-27 · Monaco Time Trial</title>
 <link rel="manifest" href="./manifest.webmanifest">
 <link rel="apple-touch-icon" href="./icons/icon-180.png">
 <link rel="icon" type="image/png" href="./icons/icon-192.png">
-<link rel="preload" as="image" href="./assets/loading.webp">
 <style>
 :root {
   --navy: #0e1730; --navy2: #16213f; --red: #e2202e; --yellow: #ffc20e;
@@ -35,30 +34,46 @@ canvas#view { position: absolute; inset: 0; width: 100%; height: 100%; display: 
 .layer.on { display: block; }
 button { font: inherit; color: inherit; border: 0; background: none; cursor: pointer; touch-action: manipulation; }
 
-/* ---------- loading ---------- */
-#loading { background: #0b1220 url("./assets/loading.webp") center / cover no-repeat; z-index: 40; }
-#loading::after { content: ""; position: absolute; inset: 0; background: linear-gradient(180deg, rgba(8,12,24,0.15) 0%, rgba(8,12,24,0.0) 45%, rgba(8,12,24,0.78) 100%); }
-#loadBox { position: absolute; z-index: 2; left: calc(var(--sa-l) + 28px); right: calc(var(--sa-r) + 28px); bottom: calc(var(--sa-b) + 22px); display: flex; align-items: flex-end; gap: 18px; }
-#loadCorner { width: min(34vw, 280px); aspect-ratio: 16 / 9; border-radius: 10px; background: #1a2440 center / cover; box-shadow: 0 8px 24px rgba(0,0,0,0.45); border: 1px solid rgba(255,255,255,0.18); flex: none; }
-#loadInfo { flex: 1; min-width: 0; }
-#loadTitle { font-size: clamp(22px, 4.2vw, 40px); font-weight: 800; letter-spacing: 0.02em; text-shadow: 0 2px 10px rgba(0,0,0,0.6); }
-#loadCornerName { font-size: 15px; color: var(--yellow); font-weight: 700; margin-top: 4px; letter-spacing: 0.04em; text-transform: uppercase; }
-#loadMap { width: 120px; height: 120px; flex: none; }
-#loadBarWrap { height: 6px; background: rgba(255,255,255,0.18); border-radius: 3px; overflow: hidden; margin-top: 12px; }
-#loadBar { height: 100%; width: 0%; background: linear-gradient(90deg, var(--red), var(--yellow)); transition: width 0.25s ease-out; }
-#loadPct { font-size: 13px; color: var(--muted); margin-top: 6px; }
+/* ---------- loading: deep black, silver type, restrained Red Bull accents ---------- */
+#loading { z-index: 40; background: radial-gradient(120% 95% at 50% 36%, #18191c 0%, #0c0c0e 54%, #040405 100%); transition: opacity 0.9s ease; }
+#loading.out { opacity: 0; pointer-events: none; }
+#loading::after { content: ""; position: absolute; inset: 0; pointer-events: none; background: radial-gradient(140% 120% at 50% 45%, transparent 55%, rgba(0,0,0,0.55) 100%); }
+#ldStage { position: absolute; inset: 0; z-index: 1; display: flex; align-items: center; justify-content: center; padding: calc(var(--sa-t) + 10px) calc(var(--sa-r) + 28px) calc(var(--sa-b) + 54px) calc(var(--sa-l) + 28px); }
+#ldBrand { text-align: center; transition: opacity 0.6s ease, transform 1.2s cubic-bezier(.2,.7,.2,1); }
+#loading.out #ldBrand { opacity: 0; transform: scale(1.025); }
+.ld { font-family: "SF Pro Display", "Helvetica Neue", Helvetica, Arial, sans-serif; }
+#ldMark { font-weight: 200; font-size: clamp(54px, 11vh + 3vw, 128px); line-height: 1; letter-spacing: 0.14em; padding-left: 0.14em; background: linear-gradient(180deg, #ffffff 0%, #dcdde0 46%, #8a8c92 100%); -webkit-background-clip: text; background-clip: text; color: transparent; animation: ldMark 1.8s cubic-bezier(.2,.7,.2,1) both; }
+@keyframes ldMark { from { opacity: 0; letter-spacing: 0.34em; filter: blur(7px); } to { opacity: 1; letter-spacing: 0.14em; filter: blur(0); } }
+#ldRule { position: relative; width: min(260px, 42vw); height: 1px; margin: 16px auto 18px; background: linear-gradient(90deg, transparent, rgba(255,255,255,0.32), transparent); animation: ldFade 1.4s 0.6s both; }
+#ldRule i { position: absolute; left: 50%; top: -0.5px; width: 28px; height: 2px; margin-left: -14px; background: #d81f2c; }
+#ldTeam { font-size: 11px; font-weight: 500; letter-spacing: 0.46em; padding-left: 0.46em; color: #b7b9bf; animation: ldUp 1.1s 0.9s both; }
+#ldDriver { margin-top: 14px; font-size: clamp(20px, 2.2vw + 7px, 30px); font-weight: 300; letter-spacing: 0.30em; padding-left: 0.30em; color: #f3f3f5; animation: ldUp 1.1s 1.15s both; }
+#ldEvent { margin-top: 14px; font-size: 10.5px; font-weight: 500; letter-spacing: 0.42em; padding-left: 0.42em; color: #8a8c92; animation: ldUp 1.1s 1.4s both; }
+#ldEvent i { display: inline-block; width: 4px; height: 4px; border-radius: 50%; background: #ffc20e; margin: 0 1.1em 0 0.7em; vertical-align: middle; transform: translateY(-1px); }
+@keyframes ldUp { from { opacity: 0; transform: translateY(9px); } to { opacity: 1; transform: none; } }
+@keyframes ldFade { from { opacity: 0; } to { opacity: 1; } }
+#ldFoot { position: absolute; z-index: 1; left: calc(var(--sa-l) + 30px); right: calc(var(--sa-r) + 30px); bottom: calc(var(--sa-b) + 24px); display: flex; align-items: center; gap: 18px; animation: ldFade 1.2s 1.5s both; transition: opacity 0.5s ease; }
+#loading.out #ldFoot { opacity: 0; }
+#ldStatus { font-size: 9.5px; font-weight: 600; letter-spacing: 0.32em; text-transform: uppercase; color: #6f7177; min-width: 170px; white-space: nowrap; }
+#loadBarWrap { position: relative; flex: 1; height: 1px; background: rgba(255,255,255,0.11); }
+#loadBar { position: absolute; left: 0; top: -0.5px; height: 2px; width: 0%; background: linear-gradient(90deg, rgba(255,255,255,0.25), rgba(255,255,255,0.95)); transition: width 0.45s cubic-bezier(.2,.7,.2,1); }
+#loadBar::after { content: ""; position: absolute; right: -2px; top: -1px; width: 4px; height: 4px; border-radius: 50%; background: #d81f2c; box-shadow: 0 0 6px rgba(216,31,44,0.7); }
+#loadPct { min-width: 44px; text-align: right; font-size: 11px; font-weight: 500; letter-spacing: 0.1em; color: #c7c8cc; font-variant-numeric: tabular-nums; }
 
-/* ---------- menu ---------- */
-#menu { z-index: 30; background: linear-gradient(90deg, rgba(6,10,22,0.72) 0%, rgba(6,10,22,0.25) 42%, rgba(6,10,22,0) 70%); }
-#menuInner { position: absolute; left: calc(var(--sa-l) + 34px); top: calc(var(--sa-t) + 26px); bottom: calc(var(--sa-b) + 24px); display: flex; flex-direction: column; justify-content: center; gap: 14px; width: min(46vw, 420px); }
-#menu h1 { margin: 0; font-size: clamp(30px, 6vw, 56px); font-weight: 900; letter-spacing: 0.03em; line-height: 0.95; text-shadow: 0 3px 14px rgba(0,0,0,0.5); }
-#menu h1 span { display: block; font-size: 0.36em; letter-spacing: 0.22em; color: var(--yellow); font-weight: 800; margin-top: 8px; }
-#menuBest { color: var(--muted); font-size: 15px; min-height: 1.2em; }
-.big { display: block; width: 100%; padding: 18px 22px; border-radius: 14px; font-size: 22px; font-weight: 800; letter-spacing: 0.04em; text-align: left; background: var(--glass); border: 1px solid rgba(255,255,255,0.14); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); }
-.big.primary { background: linear-gradient(90deg, #d71f2d, #b0141f); border-color: rgba(255,255,255,0.25); box-shadow: 0 6px 20px rgba(210,30,45,0.35); }
-.big:active { transform: scale(0.98); }
-#cineLabel { position: absolute; right: calc(var(--sa-r) + 30px); bottom: calc(var(--sa-b) + 22px); text-align: right; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; font-size: 14px; color: rgba(255,255,255,0.85); text-shadow: 0 2px 8px rgba(0,0,0,0.6); transition: opacity 0.6s; }
-#cineLabel small { display: block; color: var(--yellow); font-size: 11px; letter-spacing: 0.2em; }
+/* ---------- menu (same restrained identity) ---------- */
+#menu { z-index: 30; background: linear-gradient(90deg, rgba(4,4,6,0.86) 0%, rgba(4,4,6,0.42) 40%, rgba(4,4,6,0) 70%); opacity: 0; transition: opacity 1.1s ease 0.15s; }
+#menu.on.in { opacity: 1; }
+#menuInner { position: absolute; left: calc(var(--sa-l) + 36px); top: calc(var(--sa-t) + 24px); bottom: calc(var(--sa-b) + 24px); display: flex; flex-direction: column; justify-content: center; gap: 12px; width: min(44vw, 400px); }
+#menu .mMark { font-family: "SF Pro Display", "Helvetica Neue", Helvetica, Arial, sans-serif; font-weight: 200; font-size: 15px; letter-spacing: 0.42em; color: #c9cace; }
+#menu .mMark i { display: inline-block; width: 18px; height: 2px; background: #d81f2c; vertical-align: middle; margin-right: 12px; transform: translateY(-2px); }
+#menu h1 { margin: 0; font-family: "SF Pro Display", "Helvetica Neue", Helvetica, Arial, sans-serif; font-size: clamp(30px, 5.4vw, 52px); font-weight: 300; letter-spacing: 0.12em; line-height: 1; color: #f4f4f6; text-shadow: 0 2px 16px rgba(0,0,0,0.6); }
+#menu h1 span { display: block; font-size: 0.24em; font-weight: 500; letter-spacing: 0.42em; color: #a9abb1; margin-top: 12px; }
+#menuBest { color: #9c9ea4; font-size: 13px; letter-spacing: 0.06em; min-height: 1.2em; font-variant-numeric: tabular-nums; }
+.big { display: block; width: 100%; padding: 16px 22px; border-radius: 4px; font-size: 15px; font-weight: 600; letter-spacing: 0.32em; text-transform: uppercase; text-align: left; color: #ededf0; background: rgba(12,12,14,0.62); border: 1px solid rgba(255,255,255,0.14); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); }
+.big.primary { background: rgba(10,10,12,0.82); border-color: rgba(255,255,255,0.28); box-shadow: inset 3px 0 0 #d81f2c, 0 10px 30px rgba(0,0,0,0.35); }
+.big:active { transform: scale(0.985); }
+#cineLabel { position: absolute; right: calc(var(--sa-r) + 30px); bottom: calc(var(--sa-b) + 22px); text-align: right; font-weight: 500; letter-spacing: 0.3em; text-transform: uppercase; font-size: 12px; color: rgba(255,255,255,0.86); text-shadow: 0 2px 8px rgba(0,0,0,0.6); transition: opacity 0.6s; }
+#cineLabel small { display: block; color: #ffc20e; font-size: 10px; letter-spacing: 0.34em; margin-bottom: 4px; }
 
 /* ---------- panels (settings / pause / crash) ---------- */
 .panel { position: absolute; inset: 0; z-index: 50; background: rgba(4,8,18,0.62); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); display: none; align-items: center; justify-content: center; }
@@ -112,10 +127,13 @@ button { font: inherit; color: inherit; border: 0; background: none; cursor: poi
 
 /* ---------- touch controls ---------- */
 #controls { z-index: 15; }
-#steerZone { position: absolute; left: calc(var(--sa-l) + var(--edge)); bottom: calc(var(--sa-b) + 18px); width: min(42vw, 400px); height: min(46vh, 210px); border-radius: 22px; background: rgba(255,255,255,0.035); border: 1px solid rgba(255,255,255,0.07); touch-action: none; }
-#steerTrack { position: absolute; left: 16px; right: 16px; top: 50%; height: 4px; margin-top: -2px; border-radius: 2px; background: rgba(255,255,255,0.12); }
-#steerKnob { position: absolute; top: 50%; left: 50%; width: 58px; height: 58px; margin: -29px 0 0 -29px; border-radius: 50%; background: rgba(255,255,255,0.14); border: 2px solid rgba(255,255,255,0.35); will-change: transform; }
-#steerHint { position: absolute; bottom: 8px; left: 0; right: 0; text-align: center; font-size: 11px; font-weight: 700; color: rgba(255,255,255,0.35); letter-spacing: 0.12em; }
+/* steering zone: 80 % of the previous size (400 x 210 -> 320 x 168, knob 58 -> 46.4 px),
+   anchored in the bottom-left corner inside the safe area, 18 px clear of the screen edge
+   (iOS edge gestures) */
+#steerZone { position: absolute; left: calc(var(--sa-l) + 18px); bottom: calc(var(--sa-b) + 12px); width: min(33.6vw, 320px); height: min(36.8vh, 168px); border-radius: 17.6px; background: rgba(255,255,255,0.028); border: 1px solid rgba(255,255,255,0.06); touch-action: none; }
+#steerTrack { position: absolute; left: 12.8px; right: 12.8px; top: 50%; height: 3.2px; margin-top: -1.6px; border-radius: 1.6px; background: rgba(255,255,255,0.11); }
+#steerKnob { position: absolute; top: 50%; left: 50%; width: 46.4px; height: 46.4px; margin: -23.2px 0 0 -23.2px; border-radius: 50%; background: rgba(255,255,255,0.13); border: 1.6px solid rgba(255,255,255,0.34); will-change: transform; }
+#steerHint { position: absolute; bottom: 6.4px; left: 0; right: 0; text-align: center; font-size: 9px; font-weight: 700; color: rgba(255,255,255,0.32); letter-spacing: 0.12em; }
 #pedals { position: absolute; right: calc(var(--sa-r) + var(--edge)); bottom: calc(var(--sa-b) + 18px); display: flex; gap: 14px; align-items: flex-end; }
 .pedal { position: relative; width: min(13vw, 108px); height: min(52vh, 230px); border-radius: 20px; background: rgba(255,255,255,0.06); border: 2px solid rgba(255,255,255,0.18); overflow: hidden; touch-action: none; }
 .pedal .fill { position: absolute; left: 0; right: 0; bottom: 0; height: 0%; will-change: height; }
@@ -123,6 +141,8 @@ button { font: inherit; color: inherit; border: 0; background: none; cursor: poi
 #throttle .fill { background: linear-gradient(0deg, rgba(41,211,106,0.75), rgba(41,211,106,0.35)); }
 .pedal .lab { position: absolute; left: 0; right: 0; bottom: 12px; text-align: center; font-weight: 900; font-size: 13px; letter-spacing: 0.1em; color: rgba(255,255,255,0.8); }
 .pedal.on { border-color: rgba(255,255,255,0.6); }
+#brake.lock { border-color: #ffb020; box-shadow: 0 0 14px rgba(255,176,32,0.55); }
+#brake.lock .fill { background: linear-gradient(0deg, rgba(255,176,32,0.85), rgba(255,176,32,0.4)); }
 
 /* ---------- misc ---------- */
 #rotate { position: fixed; inset: 0; z-index: 100; background: #0b1220; display: none; align-items: center; justify-content: center; flex-direction: column; gap: 18px; text-align: center; padding: 30px; }
@@ -142,21 +162,26 @@ button { font: inherit; color: inherit; border: 0; background: none; cursor: poi
   <canvas id="view" aria-label="Monaco 3D view"></canvas>
 
   <div id="loading" class="layer on">
-    <div id="loadBox">
-      <div id="loadCorner"></div>
-      <div id="loadInfo">
-        <div id="loadTitle">Circuit de Monaco</div>
-        <div id="loadCornerName">Sainte Dévote · T1</div>
-        <div id="loadBarWrap"><div id="loadBar"></div></div>
-        <div id="loadPct">Loading… 0%</div>
+    <div id="ldStage">
+      <div id="ldBrand" class="ld">
+        <div id="ldMark">F1-27</div>
+        <div id="ldRule"><i></i></div>
+        <div id="ldTeam">ORACLE RED BULL RACING</div>
+        <div id="ldDriver">MAX VERSTAPPEN</div>
+        <div id="ldEvent">MONACO GRAND PRIX<i></i>TIME TRIAL</div>
       </div>
-      <svg id="loadMap" viewBox="0 0 100 100" aria-hidden="true"></svg>
+    </div>
+    <div id="ldFoot" class="ld">
+      <div id="ldStatus">Loading</div>
+      <div id="loadBarWrap"><div id="loadBar"></div></div>
+      <div id="loadPct">0%</div>
     </div>
   </div>
 
   <div id="menu" class="layer">
     <div id="menuInner">
-      <h1>MONACO<span>TIME TRIAL · RB20</span></h1>
+      <div class="mMark"><i></i>F1-27</div>
+      <h1>MONACO<span>GRAND PRIX · TIME TRIAL</span></h1>
       <div id="menuBest"></div>
       <button class="big primary" id="btnDrive">Drive</button>
       <button class="big" id="btnSettings">Settings</button>
@@ -254,7 +279,7 @@ button { font: inherit; color: inherit; border: 0; background: none; cursor: poi
 <div id="rotate">
   <svg viewBox="0 0 64 64"><rect x="20" y="6" width="24" height="44" rx="5"/><circle cx="32" cy="43" r="2"/><path d="M50 20c6 4 8 10 7 16M57 36l-4-3M57 36l3-4"/></svg>
   <p>Rotate your phone to play.</p>
-  <small>Monaco Time Trial is played in landscape with two thumbs.</small>
+  <small>F1-27 is played in landscape with two thumbs.</small>
 </div>
 <div id="err"></div>
 <script>

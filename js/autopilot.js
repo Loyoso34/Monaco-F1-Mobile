@@ -82,6 +82,7 @@ export class Autopilot {
   constructor(T, line, { pace = 1.0 } = {}) {
     this.T = T; this.line = line; this.pace = pace;
     this.i = 0; this.out = { steer: 0, throttle: 0, brake: 0 };
+    this.brakeCap = 1;
   }
   update(car, dt) {
     const T = this.T, L = this.line;
@@ -105,6 +106,12 @@ export class Autopilot {
     if (err > 0.5) { this.out.throttle = Math.min(1, err * 0.5 + 0.35); this.out.brake = 0; }
     else if (err < -1.2) { this.out.throttle = 0; this.out.brake = Math.min(1, -err * 0.18 + 0.15); }
     else { this.out.throttle = 0.25; this.out.brake = 0; }
+    // threshold braking: like a driver, it feels the front tyres going past their peak slip
+    // and eases the pedal (the car itself has no ABS), then squeezes it back on
+    const kF = Math.min(car.wheels[0].kappa || 0, car.wheels[1].kappa || 0);
+    if (kF < -0.13) this.brakeCap = Math.max(0.2, this.brakeCap - dt * 4);
+    else this.brakeCap = Math.min(1, this.brakeCap + dt * (kF > -0.09 ? 2.5 : 0.6));
+    this.out.brake = Math.min(this.out.brake, this.brakeCap);
     return this.out;
   }
 }

@@ -59,8 +59,19 @@ export class Controls {
   _pedalValue(k, y) {
     const r = this.pedalEls[k].getBoundingClientRect();
     const rel = Math.max(0, Math.min(1, (y - r.top) / r.height));     // 0 top .. 1 bottom
-    // top 70 % of the pedal = full, lower part ramps down to 30 %
+    if (k === 'brake') {
+      // brake pressure is progressive over the whole pedal: ~22 % at the bottom edge, ~65 %
+      // in the middle, 100 % only at the top -- slide the thumb down to bleed pressure off
+      // as the speed (and downforce) falls, like a driver does with the pedal
+      const top = Math.max(0, rel - 0.06) / 0.94;
+      return Math.max(0.22, Math.min(1, 0.22 + 0.78 * Math.pow(1 - top, 0.85)));
+    }
+    // throttle: top 70 % of the pedal = full, lower part ramps down to 30 %
     return Math.max(0.3, Math.min(1, 1 - Math.max(0, rel - 0.7) / 0.3 * 0.7));
+  }
+  // front tyres locking: the brake pedal glows so the driver can ease off
+  setLock(on) {
+    if (on !== this._lock) { this._lock = on; this.pedalEls.brake.classList.toggle('lock', on); }
   }
 
   _touchStart(t) {
@@ -77,7 +88,9 @@ export class Controls {
     const x = t.clientX, y = t.clientY;
     if (t.identifier === this.steerTouch) {
       const w = this.zone.getBoundingClientRect().width;
-      const full = w * 0.34 / Math.max(0.3, settings.steerSens);    // px for full lock
+      // px of thumb travel for full lock: the same physical travel as before the zone was made
+      // 20 % smaller (0.34 x the previous width = 0.425 x the current width)
+      const full = w * 0.425 / Math.max(0.3, settings.steerSens);
       const raw = Math.max(-1, Math.min(1, (x - this.steerStartX) / full));
       // a resting thumb jitters by a pixel or two: small rest deadzone, rescaled so the
       // response stays continuous outside it
