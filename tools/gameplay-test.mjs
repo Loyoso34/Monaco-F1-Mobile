@@ -258,7 +258,9 @@ const mirrorStats = async (id) => ev(async (id) => {
   const a = window.__app, T = a.track, THREE = a.THREE;
   a.__autoOverride = false; a.controls.enabled = false; a.controls.clear();
   a.veh.reset(T.wrapS(T.corners.find(c => c.id === id).s + 30), 0, { speed: 0 }); a.timing.teleport(a.veh.s);
-  a.rig.setMode('tcam');
+  // the reflection depends on the viewer: measure it from the driver's eye, the viewpoint the
+  // glasses are aimed for (from the T-cam above and behind them they show mostly the car)
+  a.rig.setMode('cockpit');
   const r0 = a.mirrors.stats.renders;
   await new Promise(r => setTimeout(r, 1500));
   const out = { renders: a.mirrors.stats.renders - r0, mirrors: [] };

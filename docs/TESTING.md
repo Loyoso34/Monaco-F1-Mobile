@@ -9,7 +9,7 @@ say nothing about the phone (see *Still needs a physical-phone test*).
 
 | Test | Result |
 |---|---|
-| Acceptance checks (`tools/gameplay-test.mjs out iphone`) | **43 / 43** pass (steering direction, wheel ratio, pedals, timing, damage, mirrors, no page errors) |
+| Acceptance checks (`tools/gameplay-test.mjs out iphone`) | **43 / 43** pass (steering direction, wheel ratio, pedals, timing, damage, mirrors, no page errors); cold launch 2.6 s (emulated). The mirror checks now read the glasses from the driver's eye - the viewpoint they are aimed for - instead of the T-cam above and behind them, which after the driver was seated 2.8 cm lower saw mostly the car's own bodywork in them (difference between Ste Dévote and the Pool L 0.050 / R 0.046 from the eye, threshold 0.01) |
 | Circuit inspection (`tools/inspect-circuit.mjs`) | **all checks pass on High, Medium and Low**: 0 scenery points in the drivable volume (new balconies, awnings, retaining walls included), 0 buildings on pavements, 0 overlapping footprints of 608, 0 floating bases of 552, terrain under the circuit everywhere; self-test still catches planted faults |
 | Braking / traction (`tools/handling-test.mjs`) | **9 / 9** (Standard), **8 / 8** (assists off) |
 | Zero steering / straight line (`tools/straight-line-test.mjs`) | all pass: heading change 0.00000°, drift 0.0000 m |
@@ -62,7 +62,7 @@ High tier, at ten points round the lap:
 
 Cost control added for the new work: building detail (balconies, awnings, cornices,
 parapets, plant) is a separate mesh per 150 m tile on its own render layer, drawn only in the
-main view and only within 280 m; the mirrors (to 200 m) and the reflection cube (to 240 m,
+main view and only within 280 m; the mirrors and the reflection cube (to 240 m,
 one face per frame, building walls and roofs only) skip it; one facade material for the whole
 city; the building shade is baked once at load. The adaptive quality still lowers the render
 scale, then the tier (Medium: 64 px reflection cube, smaller mirrors and shadow map; Low:

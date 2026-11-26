@@ -6,8 +6,8 @@
 //  * the near plane lies on the glass: nothing behind the mirror leaks into it;
 //  * every texel of the small render target lands on the glass.
 // The two mirrors are refreshed on alternate frames (each at half the frame rate), without
-// shadow-map updates, out to 200 m, without the near-only building detail (render layer 3), and
-// skipped when the glass is off-screen or seen from behind.
+// shadow-map updates, without the near-only building detail (render layer 3), and skipped
+// when the glass is off-screen or seen from behind.
 import * as THREE from 'three';
 
 // render-target sizes match the 4:1 glass (200 x 50 mm)
@@ -94,7 +94,7 @@ export class Mirrors {
       const vn = T.n.clone().multiplyScalar(-1);              // camera +z (towards the eye)
       const d = -T.va.dot(vn);                                  // eye -> glass plane distance
       if (d < 1e-4) continue;
-      const near = d, far = 200;                              // beyond ~200 m the scene is a few texels in the glass
+      const near = d, far = 320;                              // beyond ~300 m the scene is sub-pixel in the glass
       let l = T.r.dot(T.va), rr = T.r.dot(T.vb), b = T.u.dot(T.va), t = T.u.dot(T.vc);
       { const cx = (l + rr) / 2, cy = (b + t) / 2; l = cx + (l - cx) * CONVEX[0]; rr = cx + (rr - cx) * CONVEX[0]; b = cy + (b - cy) * CONVEX[1]; t = cy + (t - cy) * CONVEX[1]; }
       const cam = m.cam;
