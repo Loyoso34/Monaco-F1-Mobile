@@ -443,7 +443,7 @@ export function buildCockpit({ chassis, carbonMap, carbonNormal, hi, q, helmetCe
     const upper = add(armsG, seg(0.043, 0.037), suitMat, 'upperArm');
     const fore = add(armsG, seg(0.037, 0.031), suitMat, 'forearm');
     const elbow = add(armsG, new THREE.SphereGeometry(0.038, 12, 8), suitMat, 'elbow');
-    const shoulder = new THREE.Vector3(h.sx * 0.180, 0.522, q(helmetCentreFA + 0.035));
+    const shoulder = new THREE.Vector3(h.sx * 0.180, 0.502, q(helmetCentreFA + 0.035));
     return { h, upper, fore, elbow, shoulder };
   });
   const LU = 0.28, LF = 0.26;                         // upper arm, forearm (to the glove cuff)

@@ -6,6 +6,7 @@ import { SPEC, Z, WHEELS, CAMERA_MOUNTS } from './carspec.js';
 import { loft, chassisSection, sampleKeys, wingElement, sweep, strut, tyreGeometry, mergeGeoms } from './geom.js';
 import { buildCockpit } from './cockpit.js';
 import { buildHalo } from './halo.js';
+import { buildHelmet } from './helmet.js';
 import { fitText, projectDecal, decalMaterial, decalAtlas } from './decals.js';
 import {
   applyAtlasUV, makeLiveryTexture, makeCarbonTextures, makeTyreTextures, makeWheelCoverTexture,
@@ -35,6 +36,24 @@ function boxUV(geom, tile = 0.05) {
   return g;
 }
 
+// Surface-following UVs for a loft (sections of equal point count, as built by loft()): u runs
+// along the car, v round the section by arc length, both in metres / tile. Unlike box
+// projection, a weave mapped this way flows continuously over rounded edges.
+function loftUV(geom, secs, tile = 0.06) {
+  const M = secs[0].pts.length, uv = new Float32Array(geom.attributes.position.count * 2);
+  for (let si = 0; si < secs.length; si++) {
+    let acc = 0;
+    const pts = secs[si].pts;
+    for (let i = 0; i < M; i++) {
+      if (i > 0) acc += Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]);
+      uv[(si * M + i) * 2] = secs[si].z / tile; uv[(si * M + i) * 2 + 1] = acc / tile;
+    }
+  }
+  for (let k = secs.length * M; k < geom.attributes.position.count; k++) { uv[k * 2] = 0; uv[k * 2 + 1] = 0; }
+  geom.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+  return geom;
+}
+
 function mirrorX(geom) {
   const g = geom.clone();
   g.scale(-1, 1, 1);
@@ -58,9 +77,10 @@ function mirrorX(geom) {
 // ---- sponsor artwork (text approximations of the 2024 wordmarks, no logo artwork) ----------
 function drawBybitDecal(c, w, h) {
   c.save();
-  const H = h * 0.84, fam = 'Helvetica Neue, Helvetica, Arial, sans-serif';
-  c.font = `900 ${Math.round(H * 1.12)}px ${fam}`;
-  const wb = c.measureText('BYB').width, wt = c.measureText('T').width, bar = H * 0.20, gap = H * 0.12;
+  const H = h * 0.88, fam = 'Helvetica Neue, Helvetica, Arial, sans-serif';
+  c.font = `800 ${Math.round(H * 1.12)}px ${fam}`;
+  if ('letterSpacing' in c) c.letterSpacing = `${(H * 0.06).toFixed(1)}px`;
+  const wb = c.measureText('BYB').width, wt = c.measureText('T').width, bar = H * 0.17, gap = H * 0.16;
   const total = wb + gap + bar + gap + wt, sc = Math.min(1, (w * 0.94) / total);
   c.translate(w / 2 - total * sc / 2, h / 2 + H * 0.05); c.scale(sc, sc);
   c.fillStyle = '#f4f4f6'; c.textBaseline = 'middle'; c.textAlign = 'left';
@@ -68,6 +88,86 @@ function drawBybitDecal(c, w, h) {
   c.fillStyle = '#f7a600'; c.fillRect(wb + gap, -H * 0.42, bar, H * 0.84);
   c.fillStyle = '#f4f4f6'; c.fillText('T', wb + gap + bar + gap, 0);
   c.restore();
+}
+// ORACLE wordmark drawn from geometric glyphs (no font): stadium-shaped O and C, R with a
+// stadium bowl and a straight diagonal leg, A without a full crossbar (the bar leaves the left
+// leg and stops short of the right one), square terminals; stroke ~15 % of the cap height.
+function drawOracle(c, w, h, color = '#ffffff') {
+  const H = h * 0.92, t = H * 0.152, y0 = (h - H) / 2;
+  // glyph advance widths in cap heights and the gap between glyphs
+  const G = { O: 1.42, R: 0.95, A: 1.20, C: 1.22, L: 0.80, E: 0.84 }, gap = 0.13;
+  const total = (G.O + G.R + G.A + G.C + G.L + G.E + gap * 5) * H;
+  const sc = Math.min(1, w * 0.995 / total);
+  c.save();
+  c.translate((w - total * sc) / 2, y0 + H * (1 - sc) / 2); c.scale(sc, sc);
+  c.fillStyle = color;
+  const stadium = (x, y, ww, hh) => { const r = hh / 2; c.moveTo(x + r, y); c.lineTo(x + ww - r, y); c.arc(x + ww - r, y + r, r, -Math.PI / 2, Math.PI / 2); c.lineTo(x + r, y + hh); c.arc(x + r, y + r, r, Math.PI / 2, Math.PI * 1.5); c.closePath(); };
+  const stadiumRev = (x, y, ww, hh) => { const r = hh / 2; c.moveTo(x + r, y); c.arc(x + r, y + r, r, -Math.PI / 2, -Math.PI * 1.5, true); c.lineTo(x + ww - r, y + hh); c.arc(x + ww - r, y + r, r, Math.PI / 2, -Math.PI / 2, true); c.closePath(); };
+  let x = 0;
+  // O
+  c.beginPath(); stadium(x, 0, G.O * H, H); stadiumRev(x + t, t, G.O * H - 2 * t, H - 2 * t); c.fill('evenodd');
+  x += (G.O + gap) * H;
+  // R: stem, bowl (upper 56 %), diagonal leg
+  {
+    const bh = H * 0.56, bw = G.R * H * 0.96;
+    c.beginPath(); c.rect(x, 0, t, H); c.fill();
+    c.beginPath();
+    const r = bh / 2;
+    c.moveTo(x, 0); c.lineTo(x + bw - r, 0); c.arc(x + bw - r, r, r, -Math.PI / 2, Math.PI / 2); c.lineTo(x, bh); c.closePath();
+    const ri = r - t;
+    c.moveTo(x + t, t); c.lineTo(x + t, bh - t); c.lineTo(x + bw - r, bh - t); c.arc(x + bw - r, r, ri, Math.PI / 2, -Math.PI / 2, true); c.closePath();
+    c.fill('evenodd');
+    // leg from the bowl's lower edge to the baseline at the right
+    const lx0 = x + bw * 0.42, lx1 = x + G.R * H;
+    c.beginPath(); c.moveTo(lx0, bh - t * 0.2); c.lineTo(lx0 + t * 1.25, bh - t * 0.2); c.lineTo(lx1, H); c.lineTo(lx1 - t * 1.3, H); c.closePath(); c.fill();
+  }
+  x += (G.R + gap) * H;
+  // A: two legs meeting in a narrow flat apex; bar from the left leg, short of the right
+  {
+    const aw = G.A * H, ax = x + aw / 2, tw = t * 1.22;
+    c.beginPath(); c.moveTo(x, H); c.lineTo(ax - tw * 0.35, 0); c.lineTo(ax + tw * 0.35, 0); c.lineTo(x + aw, H); c.lineTo(x + aw - tw, H); c.lineTo(ax, tw * 0.95); c.lineTo(x + tw, H); c.closePath(); c.fill();
+    const by = H * 0.70, k = (H - by) / H;
+    const leftX = x + aw / 2 * (1 - (by + t) / H) + tw * 0.2;
+    c.beginPath(); c.rect(leftX, by, (x + aw - tw * 1.05 - aw / 2 * k) - leftX - t * 0.75, t); c.fill();
+  }
+  x += (G.A + gap) * H;
+  // C: stadium open on the right
+  {
+    const cw = G.C * H, r = H / 2;
+    c.beginPath();
+    c.moveTo(x + cw, 0); c.lineTo(x + r, 0); c.arc(x + r, r, r, -Math.PI / 2, Math.PI / 2, true); c.lineTo(x + cw, H); c.lineTo(x + cw, H - t); c.lineTo(x + r, H - t);
+    c.arc(x + r, r, r - t, Math.PI / 2, -Math.PI / 2, false); c.lineTo(x + cw, t); c.closePath(); c.fill();
+  }
+  x += (G.C + gap) * H;
+  // L
+  c.beginPath(); c.rect(x, 0, t, H); c.rect(x, H - t, G.L * H, t); c.fill();
+  x += (G.L + gap) * H;
+  // E (middle arm slightly shorter)
+  c.beginPath(); c.rect(x, 0, t, H); c.rect(x, 0, G.E * H, t); c.rect(x, (H - t) / 2, G.E * H * 0.9, t); c.rect(x, H - t, G.E * H, t); c.fill();
+  c.restore();
+}
+// RAUCH badge: orange-yellow oval with a dark red rim and a fine light inner line, the red
+// fruit mark at the left and heavy black lettering
+function drawRauch(c, w, h) {
+  const cx = w / 2, cy = h / 2, rx = w * 0.485, ry = h * 0.465;
+  c.fillStyle = '#7a1d14'; c.beginPath(); c.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2); c.fill();
+  const g = c.createLinearGradient(0, cy - ry, 0, cy + ry);
+  g.addColorStop(0, '#f08a1c'); g.addColorStop(0.55, '#f6a523'); g.addColorStop(1, '#f9bf3a');
+  c.fillStyle = g; c.beginPath(); c.ellipse(cx, cy, rx - h * 0.055, ry - h * 0.055, 0, 0, Math.PI * 2); c.fill();
+  c.strokeStyle = 'rgba(255,214,140,0.85)'; c.lineWidth = h * 0.018;
+  c.beginPath(); c.ellipse(cx, cy, rx - h * 0.085, ry - h * 0.085, 0, 0, Math.PI * 2); c.stroke();
+  // fruit mark: round red body with a lighter cheek and a small stalk / leaf
+  const fx = w * 0.205, fy = h * 0.52, fr = h * 0.20;
+  c.fillStyle = '#c4141f'; c.beginPath(); c.arc(fx, fy, fr, 0, Math.PI * 2); c.fill();
+  c.beginPath(); c.arc(fx - fr * 0.15, fy - fr * 0.95, fr * 0.55, 0, Math.PI * 2); c.fill();
+  c.fillStyle = 'rgba(255,120,110,0.55)'; c.beginPath(); c.arc(fx - fr * 0.38, fy - fr * 0.25, fr * 0.30, 0, Math.PI * 2); c.fill();
+  c.fillStyle = '#2d6b1f'; c.beginPath(); c.ellipse(fx + fr * 0.45, fy - fr * 1.45, fr * 0.42, fr * 0.16, -0.5, 0, Math.PI * 2); c.fill();
+  c.save(); c.translate(w * 0.115, 0);
+  fitText(c, w * 0.80, h, 'RAUCH', { color: '#141010', weight: 900, stretch: 0.98, letter: -0.02, pad: 0.24, family: 'Arial Black, Helvetica Neue, Arial, sans-serif' });
+  c.restore();
+}
+function drawRokt(c, w, h) {
+  fitText(c, w, h, 'ROKT', { color: '#ffffff', weight: 900, stretch: 1.42, letter: 0.03, pad: 0.03, family: 'Arial Black, Helvetica Neue, Arial, sans-serif' });
 }
 function drawTagWide(c, w, h) {
   // TAG Heuer badge as on the chassis top: white frame, red upper field (TAG), green lower (HEUER)
@@ -123,8 +223,15 @@ export function createCar({ quality = 'high', debugColors = false } = {}) {
     // material responses (outdoor sky env): matte paint = broad soft sheen; exposed carbon =
     // dark weave under a hard glossy clear coat (sharp reflections); satin black halo; rubber =
     // rough, no sheen except at grazing angles; titanium / steel hardware = metallic
-    body: new THREE.MeshStandardMaterial({ map: tex.livery, roughness: 0.52, metalness: 0.0, envMapIntensity: 0.85 }),
-    navy: new THREE.MeshStandardMaterial({ color: NAVY, roughness: 0.52, metalness: 0.0, envMapIntensity: 0.85 }),
+    // satin navy paint: a rough, weakly reflecting base (satin pigment, F0 ~2 %) under a thin
+    // semi-gloss clear coat, so curved shoulders carry a narrow sun highlight and a soft sky
+    // sheen while the panels still read deep navy rather than silver at grazing angles
+    body: hi
+      ? new THREE.MeshPhysicalMaterial({ map: tex.livery, roughness: 0.58, metalness: 0.0, specularIntensity: 0.45, clearcoat: 0.32, clearcoatRoughness: 0.14, envMapIntensity: 0.9 })
+      : new THREE.MeshStandardMaterial({ map: tex.livery, roughness: 0.42, metalness: 0.0, envMapIntensity: 1.0 }),
+    navy: hi
+      ? new THREE.MeshPhysicalMaterial({ color: NAVY, roughness: 0.58, metalness: 0.0, specularIntensity: 0.45, clearcoat: 0.32, clearcoatRoughness: 0.14, envMapIntensity: 0.9 })
+      : new THREE.MeshStandardMaterial({ color: NAVY, roughness: 0.42, metalness: 0.0, envMapIntensity: 1.0 }),
     navyDark: new THREE.MeshStandardMaterial({ color: NAVY_DARK, roughness: 0.56, metalness: 0.0, envMapIntensity: 0.85 }),
     red: new THREE.MeshStandardMaterial({ color: RB_RED, roughness: 0.45, metalness: 0.05 }),
     yellow: new THREE.MeshStandardMaterial({ color: RB_YELLOW, roughness: 0.45 }),
@@ -132,6 +239,11 @@ export function createCar({ quality = 'high', debugColors = false } = {}) {
       ? new THREE.MeshPhysicalMaterial({ color: 0x9a9aa2, map: tex.carbon.map, normalMap: tex.carbon.normal, normalScale: new THREE.Vector2(0.16, 0.16), roughness: 0.40, metalness: 0.0, clearcoat: 1.0, clearcoatRoughness: 0.07, envMapIntensity: 1.0 })
       : new THREE.MeshStandardMaterial({ color: 0x9a9aa2, map: tex.carbon.map, roughness: 0.3, metalness: 0.0, envMapIntensity: 1.0 }),
     carbonMatte: new THREE.MeshStandardMaterial({ color: 0x74747a, map: tex.carbon.map, normalMap: tex.carbon.normal, normalScale: new THREE.Vector2(0.12, 0.12), roughness: 0.80, metalness: 0.0, envMapIntensity: 0.6 }),
+    // sculpted floor bodywork: exposed carbon under a clear coat, a little softer than the wings
+    // so its curvature shows as a broad, moving reflection; weave kept faint for motion
+    carbonBody: hi
+      ? new THREE.MeshPhysicalMaterial({ color: 0xd0d0d6, map: tex.carbon.map, normalMap: tex.carbon.normal, normalScale: new THREE.Vector2(0.10, 0.10), roughness: 0.46, metalness: 0.0, clearcoat: 0.9, clearcoatRoughness: 0.14, envMapIntensity: 1.1 })
+      : new THREE.MeshStandardMaterial({ color: 0xd0d0d6, map: tex.carbon.map, roughness: 0.34, metalness: 0.0, envMapIntensity: 1.1 }),
     tyre: new THREE.MeshStandardMaterial({ map: tex.tyre.map, roughnessMap: tex.tyre.roughness, roughness: 1.0, metalness: 0, envMapIntensity: 0.8 }),
     rim: new THREE.MeshStandardMaterial({ color: 0x1c1c20, roughness: 0.35, metalness: 0.7 }),
     cover: new THREE.MeshStandardMaterial({ map: tex.cover, roughness: 0.42, metalness: 0.25 }),
@@ -140,11 +252,8 @@ export function createCar({ quality = 'high', debugColors = false } = {}) {
     anodised: new THREE.MeshStandardMaterial({ color: 0x141518, roughness: 0.38, metalness: 0.85 }),
     inlet: new THREE.MeshStandardMaterial({ color: 0x050507, roughness: 0.9 }),
     duct: new THREE.MeshStandardMaterial({ color: 0x07080b, roughness: 0.85, side: THREE.DoubleSide }),
-    pad: new THREE.MeshStandardMaterial({ color: 0x111a33, roughness: 0.95 }),
+    pad: new THREE.MeshStandardMaterial({ color: 0x0d1226, roughness: 0.92 }),
     suit: new THREE.MeshStandardMaterial({ color: 0x1b2850, roughness: 0.85 }),
-    helmet: new THREE.MeshStandardMaterial({ color: 0x1a2a6e, roughness: 0.18, metalness: 0.2 }),
-    helmetStripe: new THREE.MeshStandardMaterial({ color: 0xf36b21, roughness: 0.2, metalness: 0.1 }),
-    visor: new THREE.MeshStandardMaterial({ color: 0x101820, roughness: 0.05, metalness: 0.8 }),
     mirror: new THREE.MeshStandardMaterial({ color: 0x8fa3b8, roughness: 0.04, metalness: 1.0 }),
     lightOff: new THREE.MeshStandardMaterial({ color: 0x400606, emissive: 0xff1010, emissiveIntensity: 0.0, roughness: 0.3 }),
     exhaust: new THREE.MeshStandardMaterial({ color: 0x5a5560, roughness: 0.4, metalness: 0.9 }),
@@ -176,7 +285,8 @@ export function createCar({ quality = 'high', debugColors = false } = {}) {
     const m = new THREE.Mesh(geom, mat);
     m.name = name || '';
     m.castShadow = opts.shadow ?? true;
-    m.receiveShadow = opts.receive ?? false;
+    // self-shadowing (the halo, mirrors, wheels and wings shade the bodywork and its logos)
+    m.receiveShadow = opts.receive ?? hi;
     parent.add(m);
     return m;
   };
@@ -192,17 +302,22 @@ export function createCar({ quality = 'high', debugColors = false } = {}) {
     { z: q(-0.400), w: 0.170, wTop: 0.133, top: 0.424, bot: 0.190, rt: 0.070, rb: 0.050, cw: 0, dip: 0 },
     { z: q(-0.150), w: 0.186, wTop: 0.148, top: 0.474, bot: 0.200, rt: 0.070, rb: 0.050, cw: 0, dip: 0 },
     { z: q(0.000), w: 0.196, wTop: 0.158, top: 0.505, bot: 0.205, rt: 0.070, rb: 0.050, cw: 0, dip: 0 },
-    { z: q(0.300), w: 0.224, wTop: 0.180, top: 0.547, bot: 0.150, rt: 0.070, rb: 0.040, cw: 0, dip: 0 },
-    { z: q(0.600), w: 0.254, wTop: 0.205, top: 0.584, bot: 0.085, rt: 0.070, rb: 0.030, cw: 0, dip: 0 },
-    { z: q(0.900), w: 0.280, wTop: 0.230, top: 0.611, bot: 0.062, rt: 0.070, rb: 0.030, cw: 0, dip: 0 },
-    { z: q(1.040), w: 0.292, wTop: 0.244, top: 0.623, bot: 0.058, rt: 0.065, rb: 0.030, cw: 0.0, dip: 0 },
-    { z: q(1.110), w: 0.298, wTop: 0.252, top: 0.630, bot: 0.058, rt: 0.060, rb: 0.030, cw: 0.17, dip: 0.12 },
-    { z: q(1.230), w: 0.306, wTop: 0.260, top: 0.640, bot: 0.058, rt: 0.060, rb: 0.030, cw: 0.232, dip: 0.27 },
-    { z: q(1.450), w: 0.314, wTop: 0.266, top: 0.654, bot: 0.058, rt: 0.060, rb: 0.030, cw: 0.244, dip: 0.32 },
-    { z: q(1.640), w: 0.316, wTop: 0.268, top: 0.668, bot: 0.058, rt: 0.060, rb: 0.030, cw: 0.238, dip: 0.32 },
-    { z: q(1.770), w: 0.310, wTop: 0.258, top: 0.688, bot: 0.058, rt: 0.060, rb: 0.030, cw: 0.205, dip: 0.24 },
-    { z: q(1.825), w: 0.298, wTop: 0.236, top: 0.760, bot: 0.058, rt: 0.060, rb: 0.030, cw: 0.09, dip: 0.07 },
-    { z: q(1.860), w: 0.282, wTop: 0.200, top: 0.860, bot: 0.060, rt: 0.065, rb: 0.030, cw: 0, dip: 0 },
+    // 2024 side reference: the chassis sides stay near-vertical up to ~0.60 m ahead of the
+    // cockpit (BYBIT sits on that flat face, the red line running through its lower half), the
+    // rim rises towards the rear of the opening, and the cockpit ends in broad rounded shoulders
+    // at ~0.75 m - the halo legs run into them and ROKT sits on the vertical wall below
+    { z: q(0.300), w: 0.226, wTop: 0.198, top: 0.560, bot: 0.150, rt: 0.055, rb: 0.040, cw: 0, dip: 0 },
+    { z: q(0.600), w: 0.256, wTop: 0.236, top: 0.612, bot: 0.085, rt: 0.040, rb: 0.030, cw: 0, dip: 0 },
+    { z: q(0.900), w: 0.282, wTop: 0.262, top: 0.638, bot: 0.062, rt: 0.040, rb: 0.030, cw: 0, dip: 0 },
+    { z: q(1.040), w: 0.294, wTop: 0.272, top: 0.652, bot: 0.058, rt: 0.044, rb: 0.030, cw: 0.0, dip: 0 },
+    { z: q(1.110), w: 0.300, wTop: 0.278, top: 0.662, bot: 0.058, rt: 0.046, rb: 0.030, cw: 0.17, dip: 0.13 },
+    { z: q(1.230), w: 0.308, wTop: 0.286, top: 0.680, bot: 0.058, rt: 0.050, rb: 0.030, cw: 0.232, dip: 0.30 },
+    { z: q(1.450), w: 0.318, wTop: 0.296, top: 0.712, bot: 0.058, rt: 0.056, rb: 0.030, cw: 0.244, dip: 0.36 },
+    { z: q(1.600), w: 0.326, wTop: 0.304, top: 0.740, bot: 0.058, rt: 0.060, rb: 0.030, cw: 0.240, dip: 0.39 },
+    { z: q(1.700), w: 0.330, wTop: 0.306, top: 0.752, bot: 0.058, rt: 0.062, rb: 0.030, cw: 0.230, dip: 0.39 },
+    { z: q(1.780), w: 0.326, wTop: 0.298, top: 0.760, bot: 0.058, rt: 0.064, rb: 0.030, cw: 0.196, dip: 0.30 },
+    { z: q(1.830), w: 0.312, wTop: 0.270, top: 0.800, bot: 0.058, rt: 0.065, rb: 0.030, cw: 0.09, dip: 0.10 },
+    { z: q(1.865), w: 0.290, wTop: 0.220, top: 0.870, bot: 0.060, rt: 0.068, rb: 0.030, cw: 0, dip: 0 },
     { z: q(1.910), w: 0.262, wTop: 0.150, top: 0.925, bot: 0.065, rt: 0.070, rb: 0.030, cw: 0, dip: 0 },
   ];
   const zs = [];
@@ -337,6 +452,85 @@ export function createCar({ quality = 'high', debugColors = false } = {}) {
       const lg = new THREE.BoxGeometry(0.008, 0.012, 0.09);
       lg.translate(side * 0.205, 0.64 - k * 0.022, q(2.62 + k * 0.03));
       add(g, lg, M.inlet, nm + 'Louvre', { shadow: false });
+    }
+  }
+
+  // =============================================================================================
+  // COCKPIT SHOULDERS behind the halo feet: rounded ridges that carry on past the airbox and
+  // ease down into the sidepod tops (2024 side reference: the tubular shoulder above ROKT that
+  // runs back along the airbox flank and catches a long highlight)
+  {
+    const SH = [
+      { z: q(1.790), xc: 0.262, w: 0.064, wTop: 0.056, top: 0.760, bot: 0.540, rt: 0.052, rb: 0.020 },
+      { z: q(1.950), xc: 0.268, w: 0.062, wTop: 0.054, top: 0.762, bot: 0.540, rt: 0.052, rb: 0.020 },
+      { z: q(2.150), xc: 0.272, w: 0.058, wTop: 0.050, top: 0.742, bot: 0.520, rt: 0.048, rb: 0.020 },
+      { z: q(2.350), xc: 0.270, w: 0.052, wTop: 0.044, top: 0.705, bot: 0.500, rt: 0.042, rb: 0.020 },
+      { z: q(2.550), xc: 0.262, w: 0.044, wTop: 0.036, top: 0.655, bot: 0.480, rt: 0.034, rb: 0.018 },
+      { z: q(2.700), xc: 0.250, w: 0.034, wTop: 0.026, top: 0.600, bot: 0.470, rt: 0.024, rb: 0.016 },
+    ];
+    for (const side of [1, -1]) {
+      const secs = [];
+      for (let z = SH[0].z; z <= SH[SH.length - 1].z + 1e-6; z += 0.04) {
+        const k = sampleKeys(SH, z);
+        const pts = chassisSection(k).map(([x, y]) => [side * (k.xc + x), y]);
+        if (side < 0) pts.reverse();
+        secs.push({ z, pts });
+      }
+      add(chassis, applyAtlasUV(loft(secs, { capStart: true, capEnd: true })), M.body, 'shoulder' + (side > 0 ? 'R' : 'L'));
+    }
+  }
+
+  // =============================================================================================
+  // FLOOR BODY: the sculpted exposed-carbon bodywork between the floor and the sidepod undercut
+  // (2024 side reference: RAUCH sits on its near-vertical leading wall; behind it the surface
+  // rolls outward and down into the floor edge in a long curve that carries a broad reflection)
+  {
+    // per station: inner x (inside the chassis), wall x, wall top, skirt end x (floor edge), skirt height
+    const FB = [
+      { d: 0.52, xi: 0.18, xw: 0.240, top: 0.300, xo: 0.30, yo: 0.030, r: 0.040, wf: 0.030, yb: 0.026 },
+      { d: 0.62, xi: 0.20, xw: 0.268, top: 0.300, xo: 0.44, yo: 0.030, r: 0.045, wf: 0.030, yb: 0.026 },
+      { d: 0.80, xi: 0.22, xw: 0.300, top: 0.255, xo: 0.66, yo: 0.034, r: 0.050, wf: 0.034, yb: 0.028 },
+      { d: 0.98, xi: 0.24, xw: 0.335, top: 0.175, xo: 0.80, yo: 0.060, r: 0.050, wf: 0.070, yb: 0.045 },
+      { d: 1.30, xi: 0.26, xw: 0.390, top: 0.150, xo: 0.86, yo: 0.082, r: 0.050, wf: 0.110, yb: 0.062 },
+      { d: 1.70, xi: 0.28, xw: 0.450, top: 0.160, xo: 0.87, yo: 0.086, r: 0.056, wf: 0.120, yb: 0.068 },
+      { d: 2.20, xi: 0.26, xw: 0.480, top: 0.160, xo: 0.87, yo: 0.088, r: 0.056, wf: 0.122, yb: 0.070 },
+      { d: 2.60, xi: 0.22, xw: 0.450, top: 0.150, xo: 0.84, yo: 0.090, r: 0.052, wf: 0.118, yb: 0.072 },
+      { d: 2.90, xi: 0.20, xw: 0.380, top: 0.135, xo: 0.72, yo: 0.092, r: 0.045, wf: 0.112, yb: 0.074 },
+      { d: 3.10, xi: 0.18, xw: 0.300, top: 0.118, xo: 0.58, yo: 0.094, r: 0.035, wf: 0.106, yb: 0.076 },
+    ];
+    const lerpKey = (d) => {
+      let i = 0; while (i < FB.length - 2 && FB[i + 1].d < d) i++;
+      const a = FB[i], b = FB[i + 1], t = Math.max(0, Math.min(1, (d - a.d) / (b.d - a.d))), ts = t * t * (3 - 2 * t);
+      const o = {}; for (const k of Object.keys(a)) o[k] = a[k] + (b[k] - a[k]) * ts; return o;
+    };
+    // closed section (x >= 0, mirrored by side): bottom, skirt rising from the floor edge into
+    // the wall, rounded top corner, flat top back to the chassis
+    const section = (k, side) => {
+      const pts = [];
+      const yb = k.yb;
+      pts.push([k.xi, yb], [k.xo, yb], [k.xo, k.yo]);
+      // skirt: concave sweep from the floor edge up to the wall foot
+      const wallFoot = Math.min(k.top - k.r - 0.005, k.wf);
+      for (let i = 1; i <= 7; i++) {
+        const t = i / 7;
+        const x = k.xo + (k.xw - k.xo) * t;
+        const y = k.yo + (wallFoot - k.yo) * Math.pow(t, 2.2);
+        pts.push([x, y]);
+      }
+      // wall up to the corner, rounded corner, top back inboard
+      for (let i = 1; i <= 3; i++) pts.push([k.xw, wallFoot + (k.top - k.r - wallFoot) * i / 3]);
+      for (let i = 1; i <= 5; i++) { const a = (Math.PI / 2) * i / 5; pts.push([k.xw - k.r + k.r * Math.cos(a), k.top - k.r + k.r * Math.sin(a)]); }
+      pts.push([k.xi, k.top]);
+      const out = pts.map(([x, y]) => [side * x, y]);
+      if (side < 0) out.reverse();
+      return out;
+    };
+    const fbGroup = group(chassis, 'floorBody');
+    for (const side of [1, -1]) {
+      const secs = [];
+      for (let d = FB[0].d; d <= FB[FB.length - 1].d + 1e-6; d += 0.04) secs.push({ z: q(d), pts: section(lerpKey(d), side) });
+      const g = loft(secs, { capStart: true, capEnd: true });
+      add(fbGroup, loftUV(g, secs, 0.05), M.carbonBody, 'floorBody' + (side > 0 ? 'R' : 'L'), { receive: true });
     }
   }
 
@@ -590,39 +784,36 @@ export function createCar({ quality = 'high', debugColors = false } = {}) {
   // DRIVER, COCKPIT PADDING, STEERING WHEEL, MIRRORS
   {
     const drv = group(chassis, 'driver');
-    // helmet (generic design, not a real driver's): navy shell, orange/red band, dark visor
-    const helmetTex = (() => {
-      const cv = document.createElement('canvas'); cv.width = 256; cv.height = 128;
-      const c = cv.getContext('2d');
-      c.fillStyle = '#1b2c78'; c.fillRect(0, 0, 256, 128);
-      c.fillStyle = '#f36b21'; c.fillRect(0, 34, 256, 10);
-      c.fillStyle = '#d8202e'; c.fillRect(0, 44, 256, 5);
-      c.fillStyle = '#ffc20e'; c.fillRect(0, 22, 256, 4);
-      // visor: front of the sphere is u ~ 0.75 after the rotation below
-      c.fillStyle = '#0b1118'; c.beginPath(); c.ellipse(192, 64, 46, 13, 0, 0, Math.PI * 2); c.fill();
-      const t = new THREE.CanvasTexture(cv); t.colorSpace = THREE.SRGBColorSpace; return t;
-    })();
-    const helmetMat = new THREE.MeshStandardMaterial({ map: helmetTex, roughness: 0.2, metalness: 0.15 });
-    const hg = new THREE.SphereGeometry(0.128, 28, 20);
-    hg.scale(1.0, 1.08, 1.14);
-    hg.translate(0, SPEC.helmetTopHeight - 0.128 * 1.08, q(SPEC.helmetCentreFA));
-    add(drv, hg, helmetMat, 'helmet');
-    // shoulders / torso (mostly hidden inside the tub)
-    const sh = new THREE.SphereGeometry(0.2, 16, 10); sh.scale(1.0, 0.45, 0.55); sh.translate(0, 0.52, q(1.62));
-    add(drv, sh, M.suit, 'shoulders');
-    // cockpit padding (headrest + side pads)
+    // helmet (js/helmet.js): shaped shell with chin bar, visor, gasket, pivots, vents and
+    // spoiler; top at the height the side reference gives (level with the halo arm beside it),
+    // head upright and seated low in the padding
     {
-      // headrest: a U-shaped foam collar round the back and sides of the helmet
+      const helmet = buildHelmet({ hi, envIntensity: 1.0 });
+      helmet.group.position.set(0, SPEC.helmetTopHeight - 0.128, q(SPEC.helmetCentreFA));
+      helmet.group.rotation.x = 0.04;
+      drv.add(helmet.group);
+    }
+    // shoulders / torso (mostly hidden inside the tub)
+    const sh = new THREE.SphereGeometry(0.2, 16, 10); sh.scale(1.0, 0.45, 0.55); sh.translate(0, 0.50, q(1.62));
+    add(drv, sh, M.suit, 'shoulders');
+    // cockpit padding: the head surround (a U-shaped foam collar round the back and sides of the
+    // helmet, its wings rising level with the cockpit shoulders) in dark padded fabric, with a
+    // deep shadowed gap between it and the helmet
+    {
       const U = new THREE.Shape();
-      const R0 = 0.118, R1 = 0.186, zc = q(1.60);
+      const R0 = 0.132, R1 = 0.205, zc = q(1.60);
       // top view: x across, y forward (+y -> towards the front after the rotation below)
-      U.moveTo(-R1, 0.16); U.lineTo(-R1, 0); U.absarc(0, 0, R1, Math.PI, 2 * Math.PI, false); U.lineTo(R1, 0.16);
-      U.lineTo(R0, 0.16); U.lineTo(R0, 0); U.absarc(0, 0, R0, 0, -Math.PI, true); U.lineTo(-R0, 0.16); U.closePath();
-      const hg = new THREE.ExtrudeGeometry(U, { depth: 0.075, bevelEnabled: true, bevelThickness: 0.018, bevelSize: 0.014, bevelSegments: 3, curveSegments: 16 });
+      U.moveTo(-R1, 0.20); U.lineTo(-R1, 0); U.absarc(0, 0, R1, Math.PI, 2 * Math.PI, false); U.lineTo(R1, 0.20);
+      U.lineTo(R0, 0.20); U.lineTo(R0, 0); U.absarc(0, 0, R0, 0, -Math.PI, true); U.lineTo(-R0, 0.20); U.closePath();
+      const hg = new THREE.ExtrudeGeometry(U, { depth: 0.120, bevelEnabled: true, bevelThickness: 0.022, bevelSize: 0.018, bevelSegments: 4, curveSegments: 20 });
       // (x, y, z) -> (x, z, -y): extrusion goes up, the closed arc ends up behind the helmet
       hg.rotateX(-Math.PI / 2);
-      hg.translate(0, 0.622, zc + 0.02);
-      add(chassis, hg, M.pad, 'headrest', { shadow: true });
+      hg.translate(0, 0.585, zc + 0.02);
+      add(chassis, hg, M.pad, 'headrest', { shadow: true, receive: true });
+      // dark well round the helmet (shadowed gap seen between the padding and the shell)
+      const well = new THREE.CylinderGeometry(R0 - 0.004, R0 - 0.010, 0.10, 28, 1, true);
+      well.translate(0, 0.64, zc + 0.02);
+      add(chassis, well, M.inlet, 'headWell', { shadow: false });
     }
     // RB20-style steering wheel with live display, shift LEDs, gloved hands and IK arms
     const cockpit = buildCockpit({ chassis, carbonMap: tex.carbon.map, carbonNormal: tex.carbon.normal, hi, q, helmetCentreFA: SPEC.helmetCentreFA });
@@ -940,34 +1131,34 @@ export function createCar({ quality = 'high', debugColors = false } = {}) {
     // positions and sizes measured on 2024 photos (Austria side view overlaid with the model in
     // the same telephoto perspective; Austria / Netherlands front close-ups)
     for (const side of [1, -1]) {
-      // ORACLE across the sidepod (title partner)
-      decal(['sidepodRBody', 'sidepodLBody'], { proj: 'side', side, center: [q(1.80), 0.53], size: [1.06, 0.16], normalMin: 0.6 },
-        (c, w, h) => fitText(c, w, h, 'ORACLE', { color: W, weight: 700, stretch: 1.55, letter: 0.06 }));
+      // ORACLE across the sidepod (title partner): the O starts 1.27 m behind the front axle,
+      // cap height 0.15 m (2024 side reference); wraps over the sidepod's shoulder and undercut
+      decal(['sidepodRBody', 'sidepodLBody'], { proj: 'side', side, center: [q(1.80), 0.472], size: [1.07, 0.162], normalMin: 0.30 },
+        (c, w, h) => drawOracle(c, w, h), 2400);
       // SIEMENS small under the rear of ORACLE
-      decal(['sidepodRBody', 'sidepodLBody'], { proj: 'side', side, center: [q(2.06), 0.335], size: [0.18, 0.03], normalMin: 0.6 },
+      decal(['sidepodRBody', 'sidepodLBody'], { proj: 'side', side, center: [q(2.08), 0.385], size: [0.18, 0.03], normalMin: 0.4 },
         (c, w, h) => fitText(c, w, h, 'SIEMENS', { color: W, weight: 700, stretch: 1.15, letter: 0.05 }), 3000);
-      // Bybit on the chassis side ahead of the sidepod
-      decal(['tub'], { proj: 'side', side, center: [q(0.63), 0.558], size: [0.34, 0.088], normalMin: 0.3 }, drawBybitDecal);
-      // ROKT on the cockpit side under the halo leg
-      decal(['tub'], { proj: 'side', side, center: [q(1.60), 0.636], size: [0.21, 0.052], normalMin: 0.3 },
-        (c, w, h) => fitText(c, w, h, 'ROKT', { color: W, weight: 900, stretch: 1.12 }));
+      // BYBIT on the flat chassis side ahead of the sidepod: letters 0.08 m tall, 0.49-0.79 m
+      // behind the front axle, the red line running through their lower half
+      decal(['tub'], { proj: 'side', side, center: [q(0.64), 0.533], size: [0.32, 0.090], normalMin: 0.3 }, drawBybitDecal, 2600);
+      // ROKT on the cockpit wall under the shoulder, behind the halo leg (1.57-1.78 m)
+      decal(['tub'], { proj: 'side', side, center: [q(1.675), 0.640], size: [0.218, 0.050], normalMin: 0.3 }, drawRokt, 3200);
       // Red Bull (bold red wordmark) on the engine cover side
       decal(['engineCover', 'sidepodRBody', 'sidepodLBody'], { proj: 'side', side, center: [q(2.53), 0.56], size: [0.60, 0.125], normalMin: 0.55 },
         (c, w, h) => fitText(c, w, h, 'Red Bull', { color: '#d8202e', weight: 900, stretch: 0.92, letter: -0.01, pad: 0.03 }));
       // HONDA towards the rear of the engine cover
       decal(['engineCover', 'sidepodRBody', 'sidepodLBody'], { proj: 'side', side, center: [q(3.14), 0.58], size: [0.38, 0.05], normalMin: 0.45 },
         (c, w, h) => fitText(c, w, h, 'HONDA', { color: W, weight: 900, stretch: 1.5, letter: 0.10 }));
-      // RAUCH: red lettering on an orange-yellow oval, low on the chassis side
-      decal(['tub'], { proj: 'side', side, center: [q(0.74), 0.175], size: [0.32, 0.10], normalMin: 0.55 },
-        (c, w, h) => { c.fillStyle = '#f9b21b'; c.beginPath(); c.ellipse(w / 2, h / 2, w * 0.47, h * 0.44, 0, 0, Math.PI * 2); c.fill(); fitText(c, w, h, 'RAUCH', { color: '#d8202e', weight: 900, pad: 0.2 }); });
+      // RAUCH badge (0.33 x 0.126 m) on the floor body's leading carbon wall
+      decal(['floorBodyR', 'floorBodyL'], { proj: 'side', side, center: [q(0.727), 0.106], size: [0.33, 0.126], normalMin: 0.45 }, drawRauch, 2400);
     }
     // chassis top ahead of the cockpit and the nose top, readable from the front (as photographed):
     // text runs towards the car's left, letters' tops towards the rear
     const FRONT_TOP = { X: [-1, 0, 0], Y: [0, 0, 1], N: [0, 1, 0] };
     const top = (targets, fa, len, hgt, draw, ppm = 3000, x = 0) => decal(targets, { basis: FRONT_TOP, center3: [x, 0, q(fa)], size: [len, hgt], normalMin: 0.45 }, draw, ppm);
-    top(['tub'], 0.675, 0.12, 0.024, (c, w, h) => fitText(c, w, h, 'ORACLE', { color: W, weight: 700, stretch: 1.4, letter: 0.06 }), 3600);
-    top(['tub'], 0.565, 0.21, 0.066, drawTagWide, 3000);
-    top(['tub'], 0.375, 0.14, 0.085, drawNumberOne, 2400);
+    top(['tub'], 0.575, 0.13, 0.024, (c, w, h) => drawOracle(c, w, h), 3600);
+    top(['tub'], 0.455, 0.21, 0.066, drawTagWide, 3000);
+    top(['tub'], 0.275, 0.14, 0.085, drawNumberOne, 2400);
     top(['tub'], -0.17, 0.175, 0.36, drawNoseStack, 2600);
     // front wing (exposed carbon): red "Red Bull" across the planes - "Red" on the right half,
     // "Bull" on the left, read from the front - and white Bybit on the upper flaps
@@ -1028,7 +1219,7 @@ export function createCar({ quality = 'high', debugColors = false } = {}) {
       }
       for (const [parent, pm] of pieces) for (const [mat, list] of pm) {
         const g = mergeGeoms(list); g.computeBoundingSphere();
-        const dm = new THREE.Mesh(g, mat); dm.name = 'decal'; dm.renderOrder = 3; dm.castShadow = false;
+        const dm = new THREE.Mesh(g, mat); dm.name = 'decal'; dm.renderOrder = 3; dm.castShadow = false; dm.receiveShadow = hi;
         parent.add(dm);
       }
     }
@@ -1062,7 +1253,7 @@ export function createCar({ quality = 'high', debugColors = false } = {}) {
       const merged = mergeGeoms(geoms);
       merged.computeBoundingSphere();
       const mm = new THREE.Mesh(merged, mat);
-      mm.castShadow = list.some(m => m.castShadow); mm.name = list[0].name + '+';
+      mm.castShadow = list.some(m => m.castShadow); mm.receiveShadow = list.some(m => m.receiveShadow); mm.name = list[0].name + '+';
       for (const m of list) grp.remove(m);
       grp.add(mm);
     }

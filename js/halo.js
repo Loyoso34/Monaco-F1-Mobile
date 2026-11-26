@@ -55,9 +55,14 @@ export function buildHalo({ q, apexFA, hi, envIntensity = 1 }) {
   mat.name = 'haloSatin';
 
   // ---- hoop centreline (car frame; FA = distance behind the front axle) -----------------------
+  // 2024 side reference (matched camera): the hoop's front top surface ~0.865 m, falling only
+  // ~9 cm to the rear, where the legs run into the raised cockpit shoulders just ahead of the
+  // airbox (no plunge down the sidepods); widest ~0.39 m either side beside the helmet, the
+  // legs pulled in to land on the shoulder tops at x ~0.30. Points: [x, y, FA], foot -> apex.
   const half = [
-    [0.387, 0.582, 1.724], [0.391, 0.628, 1.702], [0.398, 0.690, 1.672], [0.404, 0.758, 1.598], [0.398, 0.784, 1.470],
-    [0.366, 0.796, 1.305], [0.298, 0.802, 1.152], [0.190, 0.806, 1.022], [0.084, 0.808, 0.958], [0, 0.808, apexFA],
+    [0.288, 0.722, 1.800], [0.300, 0.748, 1.772], [0.320, 0.762, 1.732], [0.350, 0.770, 1.688], [0.377, 0.777, 1.630],
+    [0.392, 0.785, 1.560], [0.392, 0.793, 1.480], [0.372, 0.806, 1.350], [0.318, 0.820, 1.200], [0.218, 0.832, 1.072],
+    [0.100, 0.838, 0.996], [0, 0.840, apexFA],
   ];
   const cp = [];
   for (let i = 0; i < half.length; i++) cp.push(new THREE.Vector3(-half[i][0], half[i][1], q(half[i][2])));
@@ -75,12 +80,16 @@ export function buildHalo({ q, apexFA, hi, envIntensity = 1 }) {
     const n = up.clone().addScaledVector(t, -up.dot(t)).normalize();
     T.push(t); N.push(n); B.push(new THREE.Vector3().crossVectors(t, n).normalize());   // +B = inboard
   }
-  // section size along the hoop: u = 0 at the feet, 1 at the front
+  // section size along the hoop: u = 0 at the feet, 1 at the front. The fairing is slim (the
+  // 2024 photos give ~60 x 47 mm on the rails, i.e. the 45 mm titanium tube plus a thin skin):
+  // a touch fuller round the front corners, thickening gradually down the legs and flaring only
+  // in the last few centimetres into a fillet with the shoulder bodywork.
   const size = (s) => {
     const u = 1 - Math.abs(s - sApex) / sApex;
-    const leg = 1 - smooth(0.10, 0.34, u);           // thicker rear legs
-    const foot = 1 - smooth(0.0, 0.055, u);          // flare where the leg meets the bodywork
-    return { w: 0.074 + 0.016 * leg + 0.046 * foot, h: 0.056 + 0.010 * leg + 0.030 * foot };
+    const front = smooth(0.70, 0.95, u);             // front corners / apex
+    const leg = 1 - smooth(0.06, 0.30, u);           // rear legs
+    const foot = 1 - smooth(0.0, 0.075, u);          // fillet into the shoulder
+    return { w: 0.060 + 0.003 * front + 0.009 * leg + 0.040 * foot * foot, h: 0.047 + 0.003 * front + 0.007 * leg + 0.026 * foot * foot };
   };
   const frameAt = (s) => {
     const f = Math.max(0, Math.min(ND - 1e-6, (s / L) * ND)), i = Math.floor(f), k = f - i;
@@ -147,10 +156,13 @@ export function buildHalo({ q, apexFA, hi, envIntensity = 1 }) {
 
   // ---- centre pillar: swept blade from the foot into the hoop front ---------------------------
   {
+    // centre line of the blade, from inside the hoop front down to the chassis top: the
+    // leading edge follows the 2024 side photo (0.65 m at 0.72 m behind the axle, 0.80 m at
+    // 0.87 m, into the hoop front at ~0.97 m)
     const pts = new THREE.CatmullRomCurve3([
-      new THREE.Vector3(0, 0.818, q(apexFA + 0.012)), new THREE.Vector3(0, 0.776, q(apexFA - 0.004)), new THREE.Vector3(0, 0.728, q(apexFA - 0.036)),
-      new THREE.Vector3(0, 0.676, q(apexFA - 0.090)), new THREE.Vector3(0, 0.628, q(apexFA - 0.152)), new THREE.Vector3(0, 0.592, q(apexFA - 0.200)),
-      new THREE.Vector3(0, 0.566, q(apexFA - 0.226)),
+      new THREE.Vector3(0, 0.846, q(apexFA + 0.024)), new THREE.Vector3(0, 0.806, q(apexFA - 0.020)), new THREE.Vector3(0, 0.752, q(apexFA - 0.082)),
+      new THREE.Vector3(0, 0.700, q(apexFA - 0.142)), new THREE.Vector3(0, 0.658, q(apexFA - 0.196)), new THREE.Vector3(0, 0.634, q(apexFA - 0.232)),
+      new THREE.Vector3(0, 0.616, q(apexFA - 0.262)),
     ], false, 'centripetal').getSpacedPoints(hi ? 40 : 22);
     const n = pts.length, SG = hi ? 28 : 18;
     const pos = [], uv = [], idx = [];
@@ -162,7 +174,7 @@ export function buildHalo({ q, apexFA, hi, envIntensity = 1 }) {
       const f = i / (n - 1);                                              // 0 top .. 1 foot
       const blend = 1 - smooth(0.0, 0.22, f);                             // fillet into the hoop
       const foot = smooth(0.70, 1.0, f);                                  // fillet into the chassis
-      const chord = 0.086 - 0.006 * blend + 0.100 * foot, thick = 0.034 + 0.020 * blend + 0.016 * foot;
+      const chord = 0.104 - 0.010 * blend + 0.062 * foot, thick = 0.030 + 0.016 * blend + 0.016 * foot;
       for (let j = 0; j <= SG; j++) {
         const [a, b] = lens((j / SG) * Math.PI * 2, chord, thick);
         const p = pts[i].clone().addScaledVector(ch, a - chord * 0.06).addScaledVector(lat, b);

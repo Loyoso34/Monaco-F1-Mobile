@@ -65,10 +65,13 @@ export function outdoorEnv(renderer, sunDir = new THREE.Vector3(0.4, 0.8, 0.3)) 
       }
       return [r, g, b];
     }
-    // ground: warm grey asphalt and pavements, darker straight down (the car's own shadow)
+    // ground: sun-lit asphalt, kerbs and pavements (radiance comparable to the sky near the
+    // horizon - this warm bounce is what keeps shaded, down-facing panels neutral rather than
+    // sky-blue), darker straight down where the car's own shadow lies
     const k = Math.min(1, -e / (Math.PI / 2));
-    const base = 0.20 - 0.11 * k;
-    return [base * 1.04, base * 1.0, base * 0.95];
+    const near = Math.exp(-((Math.PI / 2 + e) ** 2) / (2 * 0.35 * 0.35));     // straight down
+    const base = 0.34 - 0.12 * k - 0.14 * near;
+    return [base * 1.05, base * 1.0, base * 0.92];
   };
   const tex = makeTex(512, 256, (d, e, phi) => {
     const c = sample(d, e, phi);

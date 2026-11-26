@@ -41,11 +41,12 @@ export const SPEC = {
   cockpitOpeningRearFA: 1.840,   // [M] headrest rear edge
   cockpitWidth: 0.520,           // [E] opening width at the shoulders
   helmetCentreFA: 1.560,         // [M]
-  helmetTopHeight: 0.852,        // [M] 2024 side photos: helmet top level with the halo arm
-  haloApexFA: 0.940,             // [M] front pillar top joins the hoop
-  haloTopHeight: 0.805,          // [M] top of the hoop at the apex
-  haloRearFA: 1.700,             // [M] rear mounts
-  haloRearHalfWidth: 0.395,      // [E]
+  helmetTopHeight: 0.826,        // [M] 2024 side reference (matched camera): helmet top level with the top of the
+                                 //     halo arm beside it, ~4 cm under the hoop's front top surface
+  haloApexFA: 0.968,             // [M] hoop centre line at the front (pillar leading edge meets it at ~0.95)
+  haloTopHeight: 0.865,          // [M] top surface of the hoop at the front (centre line 0.840)
+  haloRearFA: 1.775,             // [M] legs run into the cockpit shoulders just ahead of the airbox
+  haloRearHalfWidth: 0.300,      // [E] feet on the shoulder tops; widest 0.392 beside the helmet
   haloTubeDia: 0.049,            // [E] structural tube ~49 mm; aero fairing on top
   rollHoopFA: 1.790,             // [M] airbox inlet front face
   airboxTopHeight: 0.950,        // [R] 950 mm max height / [M]
@@ -84,11 +85,11 @@ export const CAMERA_MOUNTS = {
   tcam: { x: 0, y: SPEC.tcamHeight, z: Z.fromFA(SPEC.tcamFA), pitchDeg: -6.5, vfov16x9: 54 },
   // driver's eye at the visor: the steering wheel's LEDs, display and the gloves sit in the
   // lower part of the frame, the halo pillar in the middle, as in helmet-camera footage
-  // eye 0.756 m: 0.096 m under the helmet top, which the 2024 side photos put level with the
-  // halo arm; the halo crossbar then sits just above the eye line. Field of view of a helmet
+  // eye 0.728 m: 0.098 m under the helmet top (0.826), which the 2024 side reference puts level
+  // with the top of the halo arm beside it; the crossbar's lower edge is ~8 cm above the eye. Field of view of a helmet
   // camera (~112 deg across a 16:9 frame): halo bar across the top, pillar in the middle, both
   // front tyres beside the nose, the wheel at the bottom and both mirrors at the frame edges
-  cockpit: { x: 0, y: 0.756, z: Z.fromFA(1.47), pitchDeg: -10.5, vfov16x9: 80 },
+  cockpit: { x: 0, y: 0.728, z: Z.fromFA(1.47), pitchDeg: -9.0, vfov16x9: 80 },
 };
 
 // Collision geometry: circles in the ground plane (x, z, radius) at the car's real

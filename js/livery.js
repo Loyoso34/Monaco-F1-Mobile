@@ -4,8 +4,12 @@
 import * as THREE from 'three';
 import { Z } from './carspec.js';
 
-export const NAVY = '#16213f';      // matte "RB navy"
-export const NAVY_DARK = '#0e1630';
+// satin "RB navy": calibrated on the 2024 side reference against the white ORACLE lettering on
+// the same panel (navy / white ~ 1 / 170 in linear light, the white close to clipping, so the
+// paint is taken about twice that): a very dark blue whose navy look also comes from the sky
+// sheen on its curved, clear-coated surfaces
+export const NAVY = '#131b37';
+export const NAVY_DARK = '#0c1126';
 export const RB_RED = '#d8202e';
 export const RB_YELLOW = '#ffc20e';
 export const RB_ORANGE = '#f7941d';
@@ -36,6 +40,10 @@ export function atlasUV(x, y, z, nx, ny, nz, out) {
     return out;
   }
   const s = ATLAS.side;
+  // cockpit interior walls (inside the opening, facing the driver): dark, unpainted
+  if (z > Z.fromFA(1.06) && z < Z.fromFA(1.86) && Math.abs(x) < 0.255 && y > 0.30 && nx * Math.sign(x || 1) < -0.25) {
+    out[0] = 0.5; out[1] = yy(ATLAS.under.y0 + 24); return out;
+  }
   const row = (1 - (y - s.yMin) / (s.yMax - s.yMin)) * s.h;
   if (nx >= 0) { out[0] = zToU(z); out[1] = yy(s.y0 + row); }
   else { out[0] = 1 - zToU(z); out[1] = yy(ATLAS.sideL.y0 + row); }
@@ -150,18 +158,23 @@ export function makeLiveryTexture(size = 2048) {
       const [s1x, s1y] = P(Z.fromFA(edge[edge.length - 1][0]), -0.05); ctx.lineTo(s1x, s1y);
       ctx.closePath(); ctx.fill();
     }
-    // red pin stripe along the chassis side
+    // red pin stripe along the chassis side, broken by the BYBIT letters and running through
+    // their lower half (2024 side reference), then a red line along the sidepod shoulder
     {
-      const [xa] = P(Z.fromFA(0.15), 0), [xb] = P(Z.fromFA(1.25), 0);
-      const [, y] = P(0, 0.465);
-      ctx.fillStyle = RB_RED; ctx.fillRect(Math.min(xa, xb), y - 0.009 * ppm, Math.abs(xb - xa), 0.018 * ppm);
+      const seg = (fa0, fa1, y, hh) => {
+        const [xa] = P(Z.fromFA(fa0), 0), [xb] = P(Z.fromFA(fa1), 0), [, yy] = P(0, y);
+        ctx.fillStyle = RB_RED; ctx.fillRect(Math.min(xa, xb), yy - hh / 2 * ppm, Math.abs(xb - xa), hh * ppm);
+      };
+      seg(0.18, 0.47, 0.512, 0.017); seg(0.81, 1.05, 0.512, 0.017);
+      seg(1.40, 2.35, 0.578, 0.012);
     }
     // (sponsor wordmarks are sharp conformal decals: see carmodel.js / decals.js)
     // airbox & engine cover upper: yellow sun -> orange -> red bull -> navy
     {
       const [xa] = P(Z.fromFA(1.70), 0), [xb] = P(Z.fromFA(3.05), 0);
       const g = ctx.createLinearGradient(xa, 0, xb, 0);
-      g.addColorStop(0, RB_YELLOW); g.addColorStop(0.18, '#f9a31c'); g.addColorStop(0.45, RB_ORANGE); g.addColorStop(0.8, '#e2462b'); g.addColorStop(1, '#c8302a');
+      // yellow round the inlet, deep orange down the airbox flanks, red towards the rear
+      g.addColorStop(0, RB_YELLOW); g.addColorStop(0.07, '#f9a01c'); g.addColorStop(0.20, '#f2801a'); g.addColorStop(0.55, '#e2462b'); g.addColorStop(1, '#c8302a');
       ctx.fillStyle = g;
       const [, y0] = P(0, 1.05);
       // lower edge (2024 side photo): high at the airbox, sweeping down along the cooling gulley
@@ -228,7 +241,7 @@ export function makeCarbonTextures() {
   }
   const img = ctx.createImageData(N, N);
   for (let i = 0; i < N * N; i++) {
-    const v = 22 + h[i] * 16;
+    const v = 34 + h[i] * 22;
     img.data[i * 4] = v; img.data[i * 4 + 1] = v; img.data[i * 4 + 2] = v + 3; img.data[i * 4 + 3] = 255;
   }
   ctx.putImageData(img, 0, 0);
