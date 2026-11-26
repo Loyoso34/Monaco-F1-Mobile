@@ -24,7 +24,10 @@ const MU0 = 1.86, MUX = 1.95, LOAD_SENS = 0.085;
 // curve of the normalised combined slip with its peak at 1 and ~76 % of the peak when fully
 // sliding (a locked or spinning tyre). The 405 mm rears carry more load before their grip
 // coefficient falls, and are stiffer.
-const TYRE_C = 1.45, TYRE_B = Math.tan(Math.PI / (2 * TYRE_C));
+// Shape factor 1.38: past the peak the force falls off progressively to ~83 % when fully
+// sliding (was 1.45 / 76 %: a sharp breakaway that was hard to catch on a thumb). The peak slip
+// angles and grip levels are unchanged.
+const TYRE_C = 1.38, TYRE_B = Math.tan(Math.PI / (2 * TYRE_C));
 const AXLE = {
   front: { mu: 1.0, fz0: 2300, kp: 0.10, ap: Math.atan(1.85 / 17.5), I: 1.15 },
   rear: { mu: 1.07, fz0: 3000, kp: 0.11, ap: Math.atan(1.85 / 19.5), I: 1.45 },
@@ -38,6 +41,11 @@ const DIFF_C = 60;                             // N m s/rad: limited-slip coupli
 // downforce falls away), less than the grip at the end of the tunnel (no lock at 290 km/h).
 const BRAKE_FORCE_MAX = 4.4 * 805 * G;
 const BRAKE_TAU_UP = 0.05, BRAKE_TAU_DOWN = 0.035;
+// Unsprung corners (vertical): wheel + upright + brake mass on the tyre's vertical stiffness and
+// the wheel rate of the (very stiff) suspension. Road input from kerbs and the street's
+// undulations makes the contact load fluctuate - which costs grip through the tyres' load
+// sensitivity, so a kerb or a bump unsettles the car instead of being invisible to it.
+const UNSPRUNG = { front: { m: 22, kt: 300e3, ks: 150e3, cs: 4200 }, rear: { m: 26, kt: 330e3, ks: 170e3, cs: 4800 } };
 const ES_MAX = 4e6;
 
 // Normalised combined-slip force: kappa (slip ratio), tanA (tan slip angle, + = patch sliding
@@ -60,12 +68,18 @@ export function brakeBias(v) {
 
 export function wheelRate(v) { return v / R_ROLL; }
 
-// maximum road-wheel angle available at speed (rad); full Monaco lock at hairpin speeds
+// maximum road-wheel angle available at speed (rad). Full thumb travel gives ~15 % more steering
+// than the front tyres need to reach their peak at that speed (the kinematic angle for the
+// car's peak lateral acceleration plus the peak slip angle), so the whole travel stays useful
+// and the last part of it lets the driver feel the front reach its limit; the old curve put
+// ~35 % of the travel beyond the peak at every speed (front scrubbing, a sliding car). Full
+// Monaco lock (23 deg) is still available at hairpin speeds.
 export function steerLimit(v) {
   const lock = SPEC.steeringLockDeg * Math.PI / 180;
-  const vv = Math.abs(v);
-  if (vv < 15) return lock;
-  return lock * Math.pow(15 / vv, 0.85);
+  const vv = Math.max(4, Math.abs(v));
+  const aPeak = G * (1.70 + 0.00034 * vv * vv);           // measured steady-state peak (tools/physics-audit.mjs)
+  const need = Math.atan(SPEC.wheelbase * aPeak / (vv * vv)) + 0.063;
+  return Math.min(lock, 1.15 * need);
 }
 
 export class Vehicle {
@@ -81,7 +95,7 @@ export class Vehicle {
     this.wheels = WHEELS.map((w, i) => ({
       id: w.id, front: w.front, left: w.left,
       fo: -w.z, ro: w.x,                           // forward / right offsets from the CG
-      r: w.r, Fz: 0, slipA: 0, slipX: 0, Fx: 0, Fy: 0, spin: 0, omega: 0,
+      r: w.r, Fz: 0, slipA: 0, slipX: 0, Fx: 0, Fy: 0, spin: 0, omega: 0, zu: 0, vu: 0, zr: 0, dFz: 0, onCurb: false,
       surface: 0, curbPhase: Math.random() * 10, travel: 0, contactY: 0, locked: false, spinning: false,
       sd: { s: 0, d: 0 },
     }));
@@ -107,7 +121,7 @@ export class Vehicle {
     this.shiftTimer = 0; this.shiftCut = 0; this.lastShift = 0; this.blip = 0;
     this.reverse = false; this.reverseHold = 0;
     this.ax = 0; this.ay = 0; this.axF = 0; this.ayF = 0; this.axL = 0; this.ayL = 0;
-    this.brakeP = 0; this.bias = brakeBias(speed); this.tc = 1;
+    this.brakeP = 0; this.bias = brakeBias(speed); this.tc = 1; this.bAid = 1;
     this.pitch = 0; this.roll = 0; this.heave = 0; this.yRoadPitch = 0; this.yRoadRoll = 0;
     this.es = ES_MAX; this.deploy = 0; this.harvest = 0; this.boost = 0;
     this.load = 0; this.torqueOut = 0; this.engineTorque = 0;
@@ -116,7 +130,7 @@ export class Vehicle {
     this.curb = [0, 0, 0, 0];
     this.slide = 0; this.scrub = 0;
     this.offTrack = 0;
-    for (const w of this.wheels) { w.spin = 0; w.omega = speed / R_ROLL; w.kappa = 0; w.travel = 0; w.sd.s = s; w.sd.d = d; }
+    for (const w of this.wheels) { w.spin = 0; w.omega = speed / R_ROLL; w.kappa = 0; w.travel = 0; w.sd.s = s; w.sd.d = d; w.zu = 0; w.vu = 0; w.zr = 0; w.zlp = undefined; w.dFz = 0; w.onCurb = false; }
     if (!keepDamage) this.damage.reset();
     this.events.length = 0;
     this._updateAttitude(0);
@@ -239,14 +253,27 @@ export class Vehicle {
     const rsdF = 0.52;
     const dLatF = m * this.ayL * this.h / tf * rsdF;          // + right accel -> load to the left
     const dLatR = m * this.ayL * this.h / SPEC.trackRear * (1 - rsdF);
-    ws[0].Fz = Wf / 2 + FdF / 2 * (1 + asym) - dLong / 2 + dLatF / 2;
-    ws[1].Fz = Wf / 2 + FdF / 2 * (1 - asym) - dLong / 2 - dLatF / 2;
-    ws[2].Fz = Wr / 2 + FdR / 2 + dLong / 2 + dLatR / 2;
-    ws[3].Fz = Wr / 2 + FdR / 2 + dLong / 2 - dLatR / 2;
+    ws[0].Fz = Wf / 2 + FdF / 2 * (1 + asym) - dLong / 2 + dLatF / 2 + ws[0].dFz;
+    ws[1].Fz = Wf / 2 + FdF / 2 * (1 - asym) - dLong / 2 - dLatF / 2 + ws[1].dFz;
+    ws[2].Fz = Wr / 2 + FdR / 2 + dLong / 2 + dLatR / 2 + ws[2].dFz;
+    ws[3].Fz = Wr / 2 + FdR / 2 + dLong / 2 - dLatR / 2 + ws[3].dFz;
 
     // --- brakes: line pressure follows the pedal; brake-by-wire rear circuit ------------------
-    const tauB = brakePedal > this.brakeP ? BRAKE_TAU_UP : BRAKE_TAU_DOWN;
-    this.brakeP += (brakePedal - this.brakeP) * Math.min(1, dt / tauB);
+    // Driving assists "Standard": a brake-lock aid (a game aid, like the traction control; the
+    // real car has neither). It eases the line pressure the way a driver's foot does when the
+    // front tyres pass their peak slip, and gives it back as they recover - no pulsing, and the
+    // car still slides if the driver keeps stamping on the pedal at very low speed. "Off" is the
+    // raw pedal.
+    let pedalEff = brakePedal;
+    if (this.assists === 'standard' && brakePedal > 0.05) {
+      const kF = Math.min(ws[0].kappa || 0, ws[1].kappa || 0);
+      const over = -kF / AXLE.front.kp;                         // 1 = at the peak slip ratio
+      if (over > 1.25) this.bAid = Math.max(0.35, this.bAid - dt * 3.2 * (over - 1.25));
+      else this.bAid = Math.min(1, this.bAid + dt * (over < 1.0 ? 2.0 : 0.6));
+      pedalEff = brakePedal * this.bAid;
+    } else this.bAid = 1;
+    const tauB = pedalEff > this.brakeP ? BRAKE_TAU_UP : BRAKE_TAU_DOWN;
+    this.brakeP += (pedalEff - this.brakeP) * Math.min(1, dt / tauB);
     if (this.brakeP < 1e-4) this.brakeP = 0;
     const bias = brakeBias(v);
     this.bias = bias;
@@ -427,19 +454,40 @@ export class Vehicle {
       w.wx = wx; w.wz = wz;
       w.surface = T.surfaceAt(pr.s, pr.d);
       w.contactY = T.heightAt(pr.s, pr.d);
-      // kerb bumps: ~1 m stripes, amplitude grows with speed
-      let bump = 0;
+      // road input under the tyre (metres): the kerb's raised top (entered over ~0.3 m) with its
+      // ~1 m ridges, or the street's ripple and longer undulations (Monaco's patched public
+      // roads), then the unsprung corner's response to it
+      let zr = 0;
       if (w.surface === 1) {
         w.curbPhase += v * dt / 1.0 * Math.PI * 2;
-        bump = 0.007 * Math.max(0, Math.sin(w.curbPhase)) * Math.min(1, v / 15);
+        if (!w.onCurb) { w.curbIn = 0; w.onCurb = true; }
+        w.curbIn = Math.min(1, (w.curbIn || 0) + v * dt / 0.3);
+        zr = 0.012 * w.curbIn + 0.005 * Math.max(0, Math.sin(w.curbPhase));
         this.curb[i] = Math.min(1, 0.25 + v / 40);
       } else {
+        w.onCurb = false;
         this.curb[i] = 0;
-        // street surface ripple
-        bump = 0.0012 * Math.sin(pr.s * 1.7 + i) * Math.sin(pr.s * 0.37) * Math.min(1, v / 30);
+        const sp = pr.s;
+        // (a function of the lap position only, the same under the left and right wheels: an
+        // uneven profile across the car would make it pull on a straight with the wheel centred)
+        zr = 0.0012 * Math.sin(sp * 1.7) * Math.sin(sp * 0.37)
+          + 0.0030 * Math.sin(sp * 0.55) * Math.sin(sp * 0.131 + 1.3);
       }
+      // the sprung mass follows the slow part of the input (it rides up onto a kerb top within
+      // ~0.15 s), so the corner sees the high-passed road: a load spike stepping onto the kerb,
+      // fluctuation over its ridges and over bumps - no lasting load offset
+      w.zlp = (w.zlp ?? zr) + (zr - (w.zlp ?? zr)) * Math.min(1, dt / 0.15);
+      zr -= w.zlp;
+      w.zr = zr;
+      const U = w.front ? UNSPRUNG.front : UNSPRUNG.rear;
+      // semi-implicit Euler at the physics rate (natural frequency ~23 Hz, damping ratio ~0.7)
+      const acc = (U.kt * (zr - w.zu) - U.ks * w.zu - U.cs * w.vu) / U.m;
+      w.vu += acc * dt; w.zu += w.vu * dt;
+      // tyre load change (the tyre can unload completely but not pull)
+      w.dFz = U.kt * (zr - w.zu);
       if (w.surface >= 2) off++;
-      w.travel += (bump - 0.018 * Math.min(1, (v / 80) ** 2) - w.travel) * Math.min(1, dt * 40);
+      // visual wheel travel: the unsprung motion plus the aero squat
+      w.travel += (w.zu - 0.018 * Math.min(1, (v / 80) ** 2) - w.travel) * Math.min(1, dt * 40);
     }
     this.offTrack = off;
   }

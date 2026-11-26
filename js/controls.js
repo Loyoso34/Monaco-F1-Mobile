@@ -66,8 +66,11 @@ export class Controls {
       const top = Math.max(0, rel - 0.06) / 0.94;
       return Math.max(0.22, Math.min(1, 0.22 + 0.78 * Math.pow(1 - top, 0.85)));
     }
-    // throttle: top 70 % of the pedal = full, lower part ramps down to 30 %
-    return Math.max(0.3, Math.min(1, 1 - Math.max(0, rel - 0.7) / 0.3 * 0.7));
+    // throttle: the top third of the pad is full throttle; below it the demand falls
+    // progressively to 25 % at the bottom edge, so a thumb can feed the power in out of slow
+    // corners (it was full over the top 70 %: practically on / off)
+    const low = Math.max(0, rel - 0.32) / 0.68;
+    return Math.max(0.25, Math.min(1, 1 - 0.75 * Math.pow(low, 0.85)));
   }
   // front tyres locking: the brake pedal glows so the driver can ease off
   setLock(on) {
@@ -135,7 +138,8 @@ export class Controls {
     if (this.steerTouch === null && (kL || kR)) target = (kR ? 1 : 0) - (kL ? 1 : 0);
     // touch steering follows the thumb closely; release / keys recentre with a short time constant
     const tc = this.steerTouch !== null ? 0.035 : 0.09;
-    this.steer += (target - this.steer) * Math.min(1, dt / tc);
+    // exact first-order response (identical at 30, 60 or 120 frames per second)
+    this.steer += (target - this.steer) * (1 - Math.exp(-dt / tc));
     // neutral is exactly zero: no residual steering left over from the exponential return
     if (target === 0 && Math.abs(this.steer) < 0.004) this.steer = 0;
     let th = 0, br = 0;

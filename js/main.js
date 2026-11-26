@@ -409,12 +409,24 @@ function frame(app) {
   requestAnimationFrame(() => frame(app));
 }
 
+// Fixed 240 Hz sub-steps from an accumulator. The driver's inputs are sampled once per frame;
+// across this frame's sub-steps they move linearly from the previous frame's values to the new
+// ones, so a thumb movement reaches the tyres as the same ramp whatever the frame rate (with a
+// step change per frame, 30 fps and 60 fps drove measurably different lines).
 function stepPhysics(app, dt, timed) {
-  const H = 1 / 240;
+  const H = 1 / 240, veh = app.veh, inp = veh.input;
+  const tgt = [inp.steer, inp.throttle, inp.brake];
+  const prev = app.prevInput || tgt;
   app.acc += dt;
-  let n = 0;
-  while (app.acc >= H && n < 14) { app.veh.step(H); app.acc -= H; n++; if (timed) app.simTime += H; }
+  const n = Math.min(14, Math.floor(app.acc / H));
+  for (let j = 0; j < n; j++) {
+    const f = (j + 1) / n;
+    veh.setInput(prev[0] + (tgt[0] - prev[0]) * f, prev[1] + (tgt[1] - prev[1]) * f, prev[2] + (tgt[2] - prev[2]) * f);
+    veh.step(H); app.acc -= H; if (timed) app.simTime += H;
+  }
   if (n >= 14) app.acc = 0;
+  veh.setInput(tgt[0], tgt[1], tgt[2]);
+  app.prevInput = tgt;
 }
 
 // Tunnel lighting. daylightAt() is the share of daylight at a point of the lap: 1 in the open,

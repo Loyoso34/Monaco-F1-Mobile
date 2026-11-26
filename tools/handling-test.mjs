@@ -23,7 +23,7 @@ function brake({ v0, pedal, steer = 0 }) {
   const v = new Vehicle(straightTrack(steer ? 400 : 12), { assists });
   v.reset(200, 0, { speed: v0 / 3.6 });
   for (let i = 0; i < 72; i++) { v.setInput(0, 0, 0); v.step(DT); }          // settle (coast 0.3 s)
-  const psi0 = v.psi; let t = 0, firstLock = null, lockF = 0, lockR = 0, peak = 0, maxR = 0, dist = 0;
+  const psi0 = v.psi; let t = 0, firstLock = null, lockF = 0, lockR = 0, peak = 0, maxR = 0, dist = 0, maxBeta = 0;
   const peakAt = { kmh: 0 };
   while (v.speed > 2 && t < 12) {
     v.setInput(steer, 0, pedal); v.step(DT); t += DT; dist += v.speed * DT;
@@ -32,10 +32,11 @@ function brake({ v0, pedal, steer = 0 }) {
     if (fl) lockF += DT; if (rl) lockR += DT;
     if (-v.ax / G > peak) { peak = -v.ax / G; peakAt.kmh = v.speed * 3.6; }
     maxR = Math.max(maxR, Math.abs(v.r));
+    if (v.speed > 5) { const f = [-Math.sin(v.psi), -Math.cos(v.psi)], r = [Math.cos(v.psi), -Math.sin(v.psi)]; maxBeta = Math.max(maxBeta, Math.abs(Math.atan2(v.vx * r[0] + v.vz * r[1], v.vx * f[0] + v.vz * f[1]))); }
   }
-  return { t, dist, peak, peakAt, firstLock, lockF, lockR, heading: (v.psi - psi0) * 57.2958, maxR: maxR * 57.2958 };
+  return { t, dist, peak, peakAt, firstLock, lockF, lockR, heading: (v.psi - psi0) * 57.2958, maxR: maxR * 57.2958, beta: maxBeta * 57.2958 };
 }
-const fmt = (r) => `stop ${r.t.toFixed(2)} s / ${r.dist.toFixed(0)} m, peak ${r.peak.toFixed(2)} g at ${r.peakAt.kmh.toFixed(0)} km/h, first lock ${r.firstLock ? `${r.firstLock.t.toFixed(2)} s at ${r.firstLock.kmh.toFixed(0)} km/h (${r.firstLock.axle})` : 'none'}, heading ${r.heading.toFixed(1)}°, max yaw rate ${r.maxR.toFixed(1)}°/s`;
+const fmt = (r) => `stop ${r.t.toFixed(2)} s / ${r.dist.toFixed(0)} m, peak ${r.peak.toFixed(2)} g at ${r.peakAt.kmh.toFixed(0)} km/h, first lock ${r.firstLock ? `${r.firstLock.t.toFixed(2)} s at ${r.firstLock.kmh.toFixed(0)} km/h (${r.firstLock.axle})` : 'none'}, heading ${r.heading.toFixed(1)}°, max yaw rate ${r.maxR.toFixed(1)}°/s, max body slip ${r.beta.toFixed(1)}°`;
 
 let r = brake({ v0: 290, pedal: 1 });
 check('290 -> 0 km/h, full pedal: 4-6 g at speed, no lock above 200 km/h, straight', r.peak > 4 && r.peak < 6 && (!r.firstLock || r.firstLock.kmh < 200) && Math.abs(r.heading) < 0.5, fmt(r));
@@ -45,10 +46,12 @@ r = brake({ v0: 200, pedal: 0.55 });
 check('200 -> 0 km/h, 55 % pedal: no lock above 100 km/h', !r.firstLock || r.firstLock.kmh < 100, fmt(r));
 r = brake({ v0: 120, pedal: 1 });
 check('120 km/h, full pedal (little downforce): the fronts lock first — no ABS', !!r.firstLock && r.firstLock.axle === 'front' && Math.abs(r.heading) < 0.5, fmt(r));
+// (no spin = the body slip angle stays small and the yaw rate moderate; with the Standard
+// brake-lock aid the fronts keep steering, so the car follows the steered arc as it stops)
 r = brake({ v0: 180, pedal: 1, steer: 0.25 });
-check('Trail braking 180 km/h, full pedal + steering: no spin', Math.abs(r.heading) < 15 && r.maxR < 45, fmt(r));
+check('Trail braking 180 km/h, full pedal + steering: no spin', r.beta < 8 && r.maxR < 45, fmt(r));
 r = brake({ v0: 120, pedal: 0.6, steer: 0.4 });
-check('Trail braking 120 km/h, 60 % pedal + 0.4 steering: no rear lock, no spin', r.lockR === 0 && Math.abs(r.heading) < 15, fmt(r));
+check('Trail braking 120 km/h, 60 % pedal + 0.4 steering: no rear lock, no spin', r.lockR === 0 && r.beta < 8 && r.maxR < 45, fmt(r));
 
 // ---- traction ------------------------------------------------------------------------------------
 function drive({ v0, thr, steer = 0, dur }) {
