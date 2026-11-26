@@ -5,6 +5,7 @@ import * as THREE from 'three';
 import * as TX from './textures.js';
 import { mergeGeometries } from 'three/addons/BufferGeometryUtils.js';
 import { buildCorridor, footprintClear, terrainLimit, clearBarAt } from './corridor.js';
+import { makeFacadeAtlas, CityBuilder, ROW, vRow, ATLAS_BAYS } from './city.js';
 
 function rng(seed) { let s = seed >>> 0; return () => ((s = (s * 1664525 + 1013904223) >>> 0) / 4294967296); }
 const R = rng(20240526);
@@ -115,8 +116,12 @@ export function buildScenery(T, { quality = 'high', renderer = null, corridor = 
     // distance from the nearest water (open sea or Port Hercule)
     const shore = Math.min(cs, polyEdgeDist(x, z, HARBOUR));
     // flat around the circuit (streets, squares, quays), gently rising further inland
+    // Monaco climbs steeply from the shore: La Condamine up to Moneghetti in the west, Monte-
+    // Carlo up to the Moyenne Corniche (Beausoleil) in the north - ~70 m half a kilometre
+    // inland, ~120 m at 800 m, so the city rises in layers behind the waterfront
     let h = ty - 0.4;
-    if (dt > 40) h += Math.max(0, dt - 70) * 0.07 + Math.max(0, shore - 150) * 0.03;
+    if (dt > 40) h += Math.max(0, dt - 60) * 0.11 + Math.max(0, shore - 100) * 0.09;
+    h = Math.min(h, 230);
     if (shore < 30) h = Math.min(h, 1.6 + shore * 0.05);   // quays a little above the water
     h = Math.max(h, rockH(x, z));
     // coastal promenade a little above sea level
@@ -188,10 +193,33 @@ export function buildScenery(T, { quality = 'high', renderer = null, corridor = 
   }
 
   // ---- buildings ----------------------------------------------------------------------------
-  const facades = [TX.facade(0), TX.facade(1), TX.facade(2)];
-  const bMats = facades.map(t => new THREE.MeshLambertMaterial({ map: t, vertexColors: true }));
-  const bBuilders = [[], [], []];
-  const PALETTE = ['#efe3c8', '#f2d7b6', '#e9c9a8', '#f4e9d8', '#e7d3b0', '#f0c9b0', '#ffffff', '#e8dcc8', '#d9c7a6', '#f3e0c0', '#e6b8a2', '#f6eed9'];
+  // one facade atlas and one material for every building (js/city.js)
+  const atlas = makeFacadeAtlas();
+  const cityMat = new THREE.MeshLambertMaterial({ map: atlas, vertexColors: true });
+  const BLD = [];
+  // district character along the lap and inland (Monaco's quarters)
+  const PAL = {
+    belle: ['#efe3c8', '#f2dcc0', '#ecd5b0', '#f5ead8', '#e9d9bd', '#f1d5c3', '#efe0cf'],
+    riviera: ['#e9b97a', '#e8a58c', '#f0cf86', '#dc9567', '#f3c6a5', '#e7c39a', '#f0dcb2', '#d9a37c', '#efc7b0'],
+    modern: ['#f2f1ec', '#e6e3dc', '#ece6da', '#dfe0dc', '#f5efe2', '#e9e4d8'],
+    old: ['#e8b77e', '#eac39c', '#e5a986', '#f0d39a', '#e2b48e', '#efc59a'],
+    hotel: ['#f4f4f2', '#eeeeea'],
+  };
+  const pick = (arr) => arr[Math.floor(R() * arr.length)];
+  const styleAtS = (s) => {
+    const r = R();
+    if (s >= 2300 || s < 330) return r < 0.72 ? 'riviera' : r < 0.9 ? 'belle' : 'modern';     // La Condamine, harbour
+    if (s < 800) return r < 0.4 ? 'riviera' : r < 0.75 ? 'belle' : 'modern';                // Ste Devote - Beau Rivage
+    if (s < 1250) return r < 0.75 ? 'belle' : 'modern';                                      // Massenet - Casino
+    if (s < 1660) return r < 0.6 ? 'modern' : 'belle';                                       // Mirabeau - Portier
+    return r < 0.7 ? 'modern' : 'hotel';                                                     // tunnel - chicane (seafront)
+  };
+  const styleAtXZ = (x, z) => {
+    const r = R();
+    if (x > 150 && z < -60) return r < 0.7 ? 'modern' : 'belle';           // Monte-Carlo heights / Beausoleil
+    if (x < 40) return r < 0.5 ? 'riviera' : 'modern';                      // La Condamine slopes, Moneghetti
+    return r < 0.6 ? 'modern' : r < 0.85 ? 'belle' : 'riviera';
+  };
   // Occupied ground: oriented rectangles (building convention: width w along (sin a, cos a),
   // depth along (cos a, -sin a)); new buildings must not overlap any of them (2-D SAT test).
   const occupied = [];
@@ -224,14 +252,17 @@ export function buildScenery(T, { quality = 'high', renderer = null, corridor = 
     return true;
   };
   // emits a box building into the builder list (base on the lowest ground under it)
-  function building(cx, cz, ang, w, dpt, h, baseY, variant, color) {
+  function building(cx, cz, ang, w, dpt, h, baseY, style, color, near = false, front = -1) {
     const ground = groundMin(cx, cz, ang, w, dpt);
     const y0 = Math.min(baseY, ground - 0.6);
-    bBuilders[variant].push({ cx, cz, ang, w, dpt, h: h + (baseY - y0), baseY: y0, color });
+    BLD.push({ cx, cz, ang, w, dpt, h: h + (baseY - y0), baseY: y0, color, style, near, front, seed: Math.floor(R() * 1e9) });
     addOcc(cx, cz, ang, w, dpt);
   }
   const cS = (id) => T.corners.find(c => c.id === id).s;
-  const quaySide = (s, side) => side > 0 && T.deltaS(cS('chicane') + 30, s) >= 0 && T.deltaS(s, cS('rascasse') - 10) >= 0;
+  // the seafront from the tunnel exit (the sea and the harbour's outer quay on the left), then the
+  // harbour quays to La Rascasse: no buildings on the left, so leaving the tunnel opens the view
+  // over the water to La Condamine and the Rock
+  const quaySide = (s, side) => side > 0 && T.deltaS(T.tunnelS[1] - 5, s) >= 0 && T.deltaS(s, cS('rascasse') - 10) >= 0;
   // Try a building at a lap position: if its footprint touches the corridor it is pushed
   // further from the road and/or made smaller instead of being dropped.
   const placeBeside = (sc, side, baseSet, w, dpt, pushes, scales) => {
@@ -262,14 +293,17 @@ export function buildScenery(T, { quality = 'high', renderer = null, corridor = 
       const first = placeBeside(sc, side, setback, w, dpt, [0, 2, 4, 7, 11, 16], [1, 0.8, 0.62]);
       if (first) {
         rej.ok++;
-        const h = opts.h ? opts.h() : 14 + R() * 22 + (R() < 0.12 ? 25 : 0);
-        building(first.x, first.z, first.ang, first.w, first.dpt, h, T.py[k] - 1.5, Math.floor(R() * 3), PALETTE[Math.floor(R() * PALETTE.length)]);
-        // second row behind (taller, up the hill) — same full-footprint test
+        const st = styleAtS(sc);
+        const h = opts.h ? opts.h() : st === 'riviera' ? 13 + R() * 12 : st === 'belle' ? 16 + R() * 12 : 18 + R() * 24 + (R() < 0.15 ? 22 : 0);
+        // first row: full architectural detail, its circuit-side face is the street front
+        building(first.x, first.z, first.ang, first.w, first.dpt, h, T.py[k] - 1.5, st, pick(PAL[st]), true, side > 0 ? 0 : 2);
+        // second row behind (taller, up the hill) - same full-footprint test
         if (!opts.single && R() < 0.85) {
           const w2 = first.w * (0.8 + R() * 0.4), d2 = 16 + R() * 10;
           const base2 = setback + first.e + first.dpt + 10 + R() * 8;
           const second = placeBeside(sc, side, base2, w2, d2, [0, 4, 9, 15], [1, 0.75]);
-          if (second) building(second.x, second.z, second.ang, second.w, second.dpt, 18 + R() * 30, terrainH(second.x, second.z) - 2, Math.floor(R() * 3), PALETTE[Math.floor(R() * PALETTE.length)]);
+          const st2 = R() < 0.5 ? st : 'modern';
+          if (second) building(second.x, second.z, second.ang, second.w, second.dpt, 20 + R() * 30, terrainH(second.x, second.z) - 2, st2, pick(PAL[st2]));
         }
       }
       s += w + 1.5 + R() * 4;
@@ -305,6 +339,11 @@ export function buildScenery(T, { quality = 'high', renderer = null, corridor = 
     const sp = (cS('pool1') + cS('pool2')) / 2;
     RES.pool = reserveAt(sp, -T.sample(T.barR, sp) - 22, 32, 70, 0.4);
   }
+  {
+    const sd = cS('ste-devote') + 4;
+    RES.chapel = reserveAt(sd, T.sample(T.barL, sd) + 13, 10, 16, 0.6);
+  }
+  if (RES.chapel) addOcc3(RES.chapel.x, RES.chapel.z, RES.chapel.rot, 10, 16, 'landmark');
   if (RES.casino) addOcc3(RES.casino.x, RES.casino.z, RES.casino.rot, 48, 32, 'landmark');
   if (RES.hdp) addOcc3(RES.hdp.x, RES.hdp.z, RES.hdp.rot, 62, 28, 'landmark');
   if (RES.pool) addOcc3(RES.pool.x, RES.pool.z, RES.pool.rot, 32, 70, 'landmark');
@@ -357,14 +396,18 @@ export function buildScenery(T, { quality = 'high', renderer = null, corridor = 
   // inland city blocks and towers further from the circuit (skyline backdrop): random sites,
   // rejected sites are re-drawn so the density is kept
   let inland = 0;
-  for (let i = 0; i < (lo ? 400 : 900) && inland < (lo ? 60 : 140); i++) {
-    const x = -700 + R() * 1700, z = -1100 + R() * 1500;
+  for (let i = 0; i < (lo ? 900 : 2600) && inland < (lo ? 90 : hi ? 320 : 220); i++) {
+    const x = -760 + R() * 1860, z = -1180 + R() * 1580;
     if (isWater(x, z) || coastSide(x, z) < 40) continue;
-    const ang = R() * Math.PI, w = 16 + R() * 16, dpt = 16 + R() * 14;
+    // terraces: blocks run along the contour lines of the hillside
+    const gx = terrainH(x + 4, z) - terrainH(x - 4, z), gz = terrainH(x, z + 4) - terrainH(x, z - 4);
+    const ang = Math.hypot(gx, gz) > 0.4 ? Math.atan2(-gz, gx) + (R() - 0.5) * 0.25 : R() * Math.PI;
+    const w = 18 + R() * 22, dpt = 13 + R() * 9;
     if (!footprintOK(x, z, ang, w, dpt, 8)) continue;
     if (!free(x, z, ang, w, dpt, 1)) continue;
     const tall = R() < 0.25;
-    building(x, z, ang, w, dpt, tall ? 45 + R() * 60 : 15 + R() * 25, terrainH(x, z) - 3, Math.floor(R() * 3), PALETTE[Math.floor(R() * PALETTE.length)]);
+    const st = styleAtXZ(x, z);
+    building(x, z, ang, w, dpt, tall && st === 'modern' ? 45 + R() * 60 : 15 + R() * 25, terrainH(x, z) - 3, st, pick(PAL[st]));
     inland++;
   }
   // the Rock: low old-town blocks
@@ -373,59 +416,14 @@ export function buildScenery(T, { quality = 'high', renderer = null, corridor = 
     const ang = 0.35 + (R() - 0.5) * 0.3, w = 10 + R() * 12, dpt = 10 + R() * 10;
     if (rockH(x, z) < 50 || !free(x, z, ang, w, dpt, 1)) continue;
     if (!footprintOK(x, z, ang, w, dpt, 4)) continue;
-    building(x, z, ang, w, dpt, 10 + R() * 9, Math.min(54, terrainH(x, z)), 0, PALETTE[Math.floor(R() * 5)]);
+    building(x, z, ang, w, dpt, 10 + R() * 9, Math.min(54, terrainH(x, z)), 'old', pick(PAL.old));
     n++;
   }
 
-  const buildGeom = (list) => {
-    const pos = [], uv = [], col = [];
-    const c = new THREE.Color();
-    for (const b of list) {
-      c.set(b.color);
-      const ca = Math.cos(b.ang), sa = Math.sin(b.ang);
-      // local axes: u along the street (ang), v perpendicular
-      const corner = (a, d) => [b.cx + sa * a + ca * d, b.cz + ca * a - sa * d];
-      const hw = b.w / 2, hd = b.dpt / 2, y0 = b.baseY, y1 = b.baseY + b.h;
-      const quads = [
-        [corner(-hw, -hd), corner(hw, -hd), b.w], [corner(hw, -hd), corner(hw, hd), b.dpt],
-        [corner(hw, hd), corner(-hw, hd), b.w], [corner(-hw, hd), corner(-hw, -hd), b.dpt],
-      ];
-      for (const [p0, p1, len] of quads) {
-        const u1 = Math.max(1, Math.round(len / 6.8)), v1 = b.h / 6.4;
-        const A = [p0[0], y0, p0[1]], B = [p1[0], y0, p1[1]], C2 = [p0[0], y1, p0[1]], D = [p1[0], y1, p1[1]];
-        // outward facing: (B - A) x (C2 - A) points away from the building centre
-        pos.push(...A, ...B, ...C2, ...B, ...D, ...C2);
-        uv.push(0, 0, u1, 0, 0, v1, u1, 0, u1, v1, 0, v1);
-        for (let k = 0; k < 6; k++) col.push(c.r, c.g, c.b);
-      }
-      // roof
-      const r0 = corner(-hw, -hd), r1 = corner(hw, -hd), r2 = corner(hw, hd), r3 = corner(-hw, hd);
-      pos.push(r0[0], y1, r0[1], r1[0], y1, r1[1], r2[0], y1, r2[1], r0[0], y1, r0[1], r2[0], y1, r2[1], r3[0], y1, r3[1]);
-      for (let k = 0; k < 6; k++) { uv.push(0.02, 0.98); col.push(c.r * 0.82, c.g * 0.8, c.b * 0.78); }
-    }
-    const g = new THREE.BufferGeometry();
-    g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-    g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
-    g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
-    g.computeVertexNormals();
-    return g;
-  };
-  // split buildings into spatial tiles for culling
-  const TILE = 520;
-  for (let v = 0; v < 3; v++) {
-    const tiles = new Map();
-    for (const b of bBuilders[v]) {
-      const key = Math.floor(b.cx / TILE) + ',' + Math.floor(b.cz / TILE);
-      if (!tiles.has(key)) tiles.set(key, []);
-      tiles.get(key).push(b);
-    }
-    for (const list of tiles.values()) {
-      const m = new THREE.Mesh(buildGeom(list), bMats[v]);
-      m.matrixAutoUpdate = false; m.name = 'buildings';
-      root.add(m);
-    }
-  }
-  const nBuildings = bBuilders.reduce((a, b) => a + b.length, 0);
+  const city = new CityBuilder({ tile: 300, detailTile: 150 });
+  for (const b of BLD) city.building(b);
+  const BLD_LANDMARK = [];
+  const nBuildings = BLD.length;
 
   // ---- landmarks ----------------------------------------------------------------------------
   // Static props are baked (world transform applied) and merged into one mesh per material
@@ -455,27 +453,50 @@ export function buildScenery(T, { quality = 'high', renderer = null, corridor = 
     return obj;
   };
   const corner = (id) => T.corners.find(c => c.id === id).s;
-  // Casino de Monte-Carlo (belle époque front, twin towers, green roofs)
-  {
+  // Casino de Monte-Carlo: belle epoque stone block with the arched base, balconettes and attic,
+  // twin towers on the corners of its square-facing front (copper caps), the central dome
+  // (three.js local +x = towards the circuit; the builder's width runs along local z)
+  const localXZ = (r, lx, lz) => [r.x + lx * Math.cos(r.rot) + lz * Math.sin(r.rot), r.z - lx * Math.sin(r.rot) + lz * Math.cos(r.rot)];
+  if (RES.casino) {
+    const r = RES.casino;
+    const y0 = Math.min(r.y - 1, groundMin(r.x, r.z, r.rot, 32, 48) - 0.5);
+    BLD_LANDMARK.push({ cx: r.x, cz: r.z, ang: r.rot, w: 30, dpt: 46, h: 17, baseY: y0, color: '#efe2c8', style: 'belle', near: true, front: 2, noAwnings: true, seed: 11 });
     const g = new THREE.Group();
-    const body = new THREE.Mesh(new THREE.BoxGeometry(46, 16, 28), stone); body.position.y = 8; g.add(body);
-    for (const sx of [-1, 1]) {
-      const tw = new THREE.Mesh(new THREE.BoxGeometry(7, 26, 7), stone); tw.position.set(sx * 19, 13, -10); g.add(tw);
-      const cap = new THREE.Mesh(new THREE.ConeGeometry(5.2, 7, 4), copper); cap.position.set(sx * 19, 29.5, -10); cap.rotation.y = Math.PI / 4; g.add(cap);
+    for (const lz of [-11.5, 11.5]) {
+      const [tx, tz] = localXZ(r, 19.5, lz);
+      city.box(tx, y0, tz, r.rot, 7.5, 27, 7.5, new THREE.Color('#efe2c8'), { row: ROW.belle, bayM: 3.75 });
+      city.box(tx, y0 + 27, tz, r.rot, 8.3, 0.8, 8.3, new THREE.Color('#e6d7ba'), { row: ROW.plain });
+      const cap = new THREE.Mesh(new THREE.ConeGeometry(5.6, 7.5, 4), copper); cap.position.set(19.5, 27.8 + 3.75, lz); cap.rotation.y = Math.PI / 4; g.add(cap);
     }
-    const dome = new THREE.Mesh(new THREE.SphereGeometry(8, 16, 8, 0, Math.PI * 2, 0, Math.PI / 2), copper); dome.position.set(0, 16, 0); g.add(dome);
-    if (RES.casino) {
-      g.position.set(RES.casino.x, Math.min(RES.casino.y - 1, groundMin(RES.casino.x, RES.casino.z, RES.casino.rot, 32, 48) - 0.5), RES.casino.z); g.rotation.y = RES.casino.rot;
-      bake(g);
-    }
-    // Hôtel de Paris
-    const hp = new THREE.Mesh(new THREE.BoxGeometry(60, 22, 26), stone); hp.position.y = 11;
-    const hg = new THREE.Group(); hg.add(hp);
-    const roof = new THREE.Mesh(new THREE.BoxGeometry(60, 3, 24), copper); roof.position.y = 23.5; hg.add(roof);
-    if (RES.hdp) {
-      hg.position.set(RES.hdp.x, Math.min(RES.hdp.y - 1, groundMin(RES.hdp.x, RES.hdp.z, RES.hdp.rot, 28, 62) - 0.5), RES.hdp.z); hg.rotation.y = RES.hdp.rot;
-      bake(hg);
-    }
+    // central entrance pavilion with the clock, and the dome
+    { const [px, pz] = localXZ(r, 24.2, 0); city.box(px, y0, pz, r.rot, 12, 20, 2.5, new THREE.Color('#f2e7d0'), { row: ROW.belleBase, bayM: 4 }); }
+    const clock = new THREE.Mesh(new THREE.CircleGeometry(1.3, 20), new THREE.MeshLambertMaterial({ color: 0xf6f1e4 })); clock.position.set(25.5, 18, 0); clock.rotation.y = Math.PI / 2; g.add(clock);
+    const dome = new THREE.Mesh(new THREE.SphereGeometry(8, 18, 9, 0, Math.PI * 2, 0, Math.PI / 2), copper); dome.position.set(0, 17, 0); g.add(dome);
+    const lantern = new THREE.Mesh(new THREE.CylinderGeometry(1.2, 1.4, 3, 10), stone); lantern.position.set(0, 25.5, 0); g.add(lantern);
+    g.position.set(r.x, y0, r.z); g.rotation.y = r.rot;
+    bake(g);
+  }
+  // Hotel de Paris: belle epoque facade along the square, copper mansard roof
+  if (RES.hdp) {
+    const r = RES.hdp;
+    const y0 = Math.min(r.y - 1, groundMin(r.x, r.z, r.rot, 28, 62) - 0.5);
+    BLD_LANDMARK.push({ cx: r.x, cz: r.z, ang: r.rot, w: 26, dpt: 60, h: 22, baseY: y0, color: '#f3e7d2', style: 'belle', near: true, front: 0, seed: 12 });
+    const hg = new THREE.Group();
+    const roof = new THREE.Mesh(new THREE.BoxGeometry(58, 3.2, 24), copper); roof.position.y = 23.6; hg.add(roof);
+    hg.position.set(r.x, y0, r.z); hg.rotation.y = r.rot;
+    bake(hg);
+  }
+  // Sainte-Devote chapel on the outside of Turn 1: pink-ochre render, terracotta roofs, bell tower
+  if (RES.chapel) {
+    const r = RES.chapel;
+    const y0 = Math.min(r.y - 1, groundMin(r.x, r.z, r.rot, 16, 10) - 0.5);
+    BLD_LANDMARK.push({ cx: r.x, cz: r.z, ang: r.rot, w: 15, dpt: 9, h: 8.5, baseY: y0, color: '#eab996', style: 'old', near: false, front: -1, seed: 13 });
+    const [bx, bz] = localXZ(r, 0, -9.4);
+    city.box(bx, y0, bz, r.rot, 3.8, 17, 3.8, new THREE.Color('#eab996'), { row: ROW.old, bayM: 3.8 });
+    const tg = new THREE.Group();
+    const spire = new THREE.Mesh(new THREE.ConeGeometry(2.9, 3.4, 4), new THREE.MeshLambertMaterial({ color: 0xb5603a })); spire.position.set(0, 17 + 1.7, -9.4); spire.rotation.y = Math.PI / 4; tg.add(spire);
+    tg.position.set(r.x, y0, r.z); tg.rotation.y = r.rot;
+    bake(tg);
   }
   // Fairmont hotel built over the tunnel: one structure that follows the curve of the road,
   // with wings standing on the ground either side of the tunnel and a roof stepped in 20 m
@@ -486,7 +507,7 @@ export function buildScenery(T, { quality = 'high', renderer = null, corridor = 
     const { q0, q1, wL, wR, seg, height } = FAIRMONT;
     const [t0] = T.tunnelS;
     const pos = [], uv = [], col = [];
-    const tint = [0.94, 0.91, 0.85];
+    const tint = [0.97, 0.96, 0.93];
     const quad = (a, b, c, d, ua, ub, uc, ud, f = 1) => {      // a,b bottom row; c,d top row; front = (b-a)x(c-a)
       pos.push(...a, ...b, ...c, ...b, ...d, ...c);
       uv.push(...ua, ...ub, ...uc, ...ub, ...ud, ...uc);
@@ -495,7 +516,7 @@ export function buildScenery(T, { quality = 'high', renderer = null, corridor = 
     const outerL = (s) => T.sample(T.barL, s) + 0.95 + wL, outerR = (s) => -T.sample(T.barR, s) - 0.95 - wR;
     const wallL = (s) => T.sample(T.barL, s) + 0.35, wallR = (s) => -T.sample(T.barR, s) - 0.35;
     const XZ = (s, d) => { const p = T.pointAt(s, d); return [p.x, p.z]; };
-    const BOT = -2;
+    const BOT = -2, FL = 3.3;
     const segs = [];
     for (let qa = q0; qa < q1 - 1; qa += seg) {
       const qb = Math.min(q1, qa + seg);
@@ -510,11 +531,16 @@ export function buildScenery(T, { quality = 'high', renderer = null, corridor = 
         const sa = T.wrapS(t0 + g.qa + (g.qb - g.qa) * i / n), sb = T.wrapS(t0 + g.qa + (g.qb - g.qa) * (i + 1) / n);
         const la = XZ(sa, outerL(sa)), lb = XZ(sb, outerL(sb)), ra = XZ(sa, outerR(sa)), rb = XZ(sb, outerR(sb));
         const du = Math.hypot(lb[0] - la[0], lb[1] - la[1]) / 6.8, v1 = (g.top - BOT) / 6.4;
-        // left (outer side of the bend) faces outwards = +n; right faces -n
-        quad([lb[0], BOT, lb[1]], [la[0], BOT, la[1]], [lb[0], g.top, lb[1]], [la[0], g.top, la[1]], [u + du, 0], [u, 0], [u + du, v1], [u, v1]);
-        quad([ra[0], BOT, ra[1]], [rb[0], BOT, rb[1]], [ra[0], g.top, ra[1]], [rb[0], g.top, rb[1]], [u, 0], [u + du, 0], [u, v1], [u + du, v1]);
+        // left (outer side of the bend) faces outwards = +n; right faces -n; one band per floor
+        const uu = du * 6.8 / 3.6 / ATLAS_BAYS, U0 = u * 6.8 / 3.6 / ATLAS_BAYS;
+        for (let y = BOT; y < g.top - 0.5; y += FL) {
+          const y2 = Math.min(g.top, y + FL), [r0, r1] = vRow(y < BOT + 2 * FL ? ROW.shop : ROW.hotel), rv = r0 + (r1 - r0) * (y2 - y) / FL;
+          quad([lb[0], y, lb[1]], [la[0], y, la[1]], [lb[0], y2, lb[1]], [la[0], y2, la[1]], [U0 + uu, r0], [U0, r0], [U0 + uu, rv], [U0, rv]);
+          quad([ra[0], y, ra[1]], [rb[0], y, rb[1]], [ra[0], y2, ra[1]], [rb[0], y2, rb[1]], [U0, r0], [U0 + uu, r0], [U0, rv], [U0 + uu, rv]);
+        }
         // roof (faces up)
-        quad([la[0], g.top, la[1]], [ra[0], g.top, ra[1]], [lb[0], g.top, lb[1]], [rb[0], g.top, rb[1]], [0.02, 0.98], [0.02, 0.98], [0.02, 0.98], [0.02, 0.98], 0.8);
+        const [f0, f1] = vRow(ROW.flat);
+        quad([la[0], g.top, la[1]], [ra[0], g.top, ra[1]], [lb[0], g.top, lb[1]], [rb[0], g.top, rb[1]], [0.02, f0], [0.3, f0], [0.02, f1], [0.3, f1], 0.8);
         u += du;
       }
     }
@@ -526,8 +552,9 @@ export function buildScenery(T, { quality = 'high', renderer = null, corridor = 
       const L2 = XZ(sq, outerL(sq)), R2 = XZ(sq, outerR(sq));
       const lo2 = Math.min(a.top, b.top), hi2 = Math.max(a.top, b.top), v = (hi2 - lo2) / 6.4, uu = Math.hypot(L2[0] - R2[0], L2[1] - R2[1]) / 6.8;
       // previous segment higher -> face looks forward (+t) over the next roof, else backwards
-      if (a.top > b.top) quad([R2[0], lo2, R2[1]], [L2[0], lo2, L2[1]], [R2[0], hi2, R2[1]], [L2[0], hi2, L2[1]], [0, 0], [uu, 0], [0, v], [uu, v]);
-      else quad([L2[0], lo2, L2[1]], [R2[0], lo2, R2[1]], [L2[0], hi2, L2[1]], [R2[0], hi2, R2[1]], [0, 0], [uu, 0], [0, v], [uu, v]);
+      const [h0, h1] = vRow(ROW.hotel), uh = uu * 6.8 / 3.6 / ATLAS_BAYS;
+      if (a.top > b.top) quad([R2[0], lo2, R2[1]], [L2[0], lo2, L2[1]], [R2[0], hi2, R2[1]], [L2[0], hi2, L2[1]], [0, h0], [uh, h0], [0, h1], [uh, h1]);
+      else quad([L2[0], lo2, L2[1]], [R2[0], lo2, R2[1]], [L2[0], hi2, L2[1]], [R2[0], hi2, R2[1]], [0, h0], [uh, h0], [0, h1], [uh, h1]);
     }
     // end faces: only the parts outside the tunnel cross-section (wings + the wall above the slab)
     for (const [g, dir] of [[segs[0], -1], [segs[segs.length - 1], 1]]) {
@@ -540,10 +567,14 @@ export function buildScenery(T, { quality = 'high', renderer = null, corridor = 
       ];
       for (const [dRight, dLeft, y0, y1] of parts) {
         const A = XZ(sq, dLeft), B = XZ(sq, dRight);
-        const uu = Math.hypot(A[0] - B[0], A[1] - B[1]) / 6.8, v = (y1 - y0) / 6.4;
-        // dir < 0: faces back along the road (-t), i.e. towards a car approaching the entrance
-        if (dir < 0) quad([A[0], y0, A[1]], [B[0], y0, B[1]], [A[0], y1, A[1]], [B[0], y1, B[1]], [0, 0], [uu, 0], [0, v], [uu, v]);
-        else quad([B[0], y0, B[1]], [A[0], y0, A[1]], [B[0], y1, B[1]], [A[0], y1, A[1]], [0, 0], [uu, 0], [0, v], [uu, v]);
+        const uu = Math.hypot(A[0] - B[0], A[1] - B[1]) / 3.6 / ATLAS_BAYS;
+        // dir < 0: faces back along the road (-t), i.e. towards a car approaching the entrance;
+        // one band per floor
+        for (let y = y0; y < y1 - 0.3; y += FL) {
+          const y2 = Math.min(y1, y + FL), [r0, r1] = vRow(ROW.hotel), rv = r0 + (r1 - r0) * (y2 - y) / FL;
+          if (dir < 0) quad([A[0], y, A[1]], [B[0], y, B[1]], [A[0], y2, A[1]], [B[0], y2, B[1]], [0, r0], [uu, r0], [0, rv], [uu, rv]);
+          else quad([B[0], y, B[1]], [A[0], y, A[1]], [B[0], y2, B[1]], [A[0], y2, A[1]], [0, r0], [uu, r0], [0, rv], [uu, rv]);
+        }
       }
     }
     const g = new THREE.BufferGeometry();
@@ -551,7 +582,7 @@ export function buildScenery(T, { quality = 'high', renderer = null, corridor = 
     g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
     g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
     g.computeVertexNormals();
-    const hotel = new THREE.Mesh(g, bMats[1]);
+    const hotel = new THREE.Mesh(g, cityMat);
     hotel.name = 'fairmont'; hotel.matrixAutoUpdate = false;
     root.add(hotel);
   }
@@ -700,6 +731,33 @@ export function buildScenery(T, { quality = 'high', renderer = null, corridor = 
     lm.add(it); lm.add(ifr);
   }
 
+  for (const b of BLD_LANDMARK) city.building(b);
+  // Retaining walls and garden walls just beyond the pavements from Mirabeau round the hairpin
+  // to Portier: coursed stone rising with the hillside on the uphill side, so the road runs in
+  // the tight cutting it does in reality
+  {
+    const wallCol = new THREE.Color('#d9cfb4');
+    for (const side of [1, -1]) {
+      let run = [];
+      const flush = () => { if (run.length > 1) city.wall(run, 0.6, wallCol); run = []; };
+      for (let s = cS('mirabeau') - 40; s <= cS('portier') + 30; s += 3) {
+        const k = T.idxOfS(s);
+        const bar = side > 0 ? T.sample(T.barL, s) : T.sample(T.barR, s);
+        const walk = side > 0 ? C.walkL[k] : C.walkR[k];
+        const p = T.pointAt(s, side * (bar + walk + 0.7));
+        const ok = !isWater(p.x, p.z) && footprintClear(C, p.x, p.z, Math.atan2(T.tx[k], T.tz[k]), 0.6, 3.2, 'walk') >= 0.15;
+        if (!ok) { flush(); continue; }
+        const yRoad = T.py[k];
+        const hill = terrainH(p.x, p.z) - yRoad;
+        const top = yRoad + Math.max(1.3, Math.min(7.5, hill + 1.2));
+        run.push([p.x, p.z, Math.min(yRoad - 1.0, groundAt(p.x, p.z) - 0.3), top]);
+      }
+      flush();
+    }
+  }
+  // the city (buildings, terraces, retaining walls) - one material, tiled for culling
+  for (const m of city.build(cityMat)) root.add(m);
+
   // merge baked props
   for (const [mat, list] of baked) {
     const g = mergeGeometries(list, false);
@@ -737,7 +795,7 @@ export function buildScenery(T, { quality = 'high', renderer = null, corridor = 
 
   return {
     root, sky, water, sunDir, nBuildings, terrainH, waterNormal, rej, corridor: C, terrainLimit: TL, terrainStep: TERRAIN_STEP,
-    footprints: occupied, buildings: bBuilders.flat(),
+    footprints: occupied, buildings: BLD.concat(BLD_LANDMARK),
   };
 }
 

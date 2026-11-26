@@ -4,16 +4,18 @@
 // reflect those surroundings and the reflections slide across the curvature of the bodywork.
 //
 // Cost control: only large, reflection-relevant objects are drawn (render layer 2: sky,
-// buildings, terrain, landmarks, road, barriers, tunnel, water); the six faces are spread over
-// several frames (High: 2 faces / frame -> a full cube every 3 frames; Medium: 1 face / frame);
+// building walls and roofs - not their balconies / awnings - terrain, landmarks, road,
+// barriers, tunnel, water); the six faces are spread over
+// several frames (one face per frame: a full cube every 6 frames, 10 times a second at 60 fps);
+// the cube sees 240 m (High) / 180 m (Medium): beyond that a reflection is a few texels;
 // the PMREM filter runs once per completed cube; no shadow-map update during these passes.
 // Low keeps the static procedural sky environment.
 import * as THREE from 'three';
 
 export const REFLECT_LAYER = 2;
 const TIERS = {
-  high: { size: 128, faces: 2, far: 420 },
-  medium: { size: 64, faces: 1, far: 300 },
+  high: { size: 128, faces: 1, far: 240 },
+  medium: { size: 64, faces: 1, far: 180 },
   low: null,
 };
 

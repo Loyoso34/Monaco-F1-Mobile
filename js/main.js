@@ -53,14 +53,14 @@ async function boot() {
     import('./carmodel.js'), import('./carspec.js'), import('./physics.js'), import('./autopilot.js'),
   ]);
   setProgress(0.40, 'Loading circuit…');
-  const [trackmesh, scenery, corridor, cameras, controls, timing, hud, fx, audio, perf, envmap, mirrors, lighting, carenv] = await Promise.all([
+  const [trackmesh, scenery, corridor, cameras, controls, timing, hud, fx, audio, perf, envmap, mirrors, lighting, carenv, shade] = await Promise.all([
     import('./trackmesh.js'), import('./scenery.js'), import('./corridor.js'), import('./cameras.js'), import('./controls.js'), import('./timing.js'),
     import('./hud.js'), import('./fx.js'), import('./audio.js'), import('./perf.js'), import('./envmap.js'),
-    import('./mirrors.js'), import('./lighting.js'), import('./carenv.js'),
+    import('./mirrors.js'), import('./lighting.js'), import('./carenv.js'), import('./shade.js'),
   ]);
   setProgress(0.48, 'Building circuit…');
   await nextFrame();
-  App = await setup({ carmodel, carspec, physics, autopilot, trackmesh, scenery, corridor, cameras, controls, timing, hud, fx, audio, perf, envmap, mirrors, lighting, carenv });
+  App = await setup({ carmodel, carspec, physics, autopilot, trackmesh, scenery, corridor, cameras, controls, timing, hud, fx, audio, perf, envmap, mirrors, lighting, carenv, shade });
 }
 
 async function setup(M) {
@@ -74,6 +74,7 @@ async function setup(M) {
   scene.fog = new THREE.FogExp2(0xd7e2e8, 0.00085);
   const camera = new THREE.PerspectiveCamera(55, innerWidth / innerHeight, 0.03, 6000);
   camera.layers.enable(1);                       // cockpit-only objects (skipped by the mirrors)
+  camera.layers.enable(3);                       // near-only building detail (js/city.js DETAIL_LAYER)
 
   const tierName = DEBUG.quality || (settings.gfx === 'auto' ? M.perf.autoTier() : settings.gfx);
   // lights
@@ -112,18 +113,35 @@ async function setup(M) {
   const sc = M.scenery.buildScenery(track, { quality: tierName, renderer, corridor });
   scene.add(sc.root);
   const envs = { outdoor: M.envmap.outdoorEnv(renderer, sc.sunDir), tunnel: M.envmap.tunnelEnv(renderer) };
+  // sun and shade between the buildings: baked into the road, kerbs, barriers and fences, and a
+  // shade table along the lap for the car's own sunlight
+  setProgress(0.78, 'Building Monaco…'); await nextFrame();
+  const shadeT0 = performance.now();
+  const shade = M.shade.buildShade(track, sc.buildings, (x, z) => sc.terrainH(x, z) - 0.25, sc.sunDir);
+  {
+    const shadeMeshes = [];
+    tm.group.traverse((o) => { if (o.isMesh && ['ground', 'roadPaint', 'barriers', 'fence', 'roadDetail'].includes(o.name)) shadeMeshes.push(o); });
+    M.shade.bakeShadeIntoMeshes(shadeMeshes, shade.shadeAt);
+  }
+  const carShade = M.shade.carShadeTable(track, shade.shadeAt);
+  const shadeMs = performance.now() - shadeT0;
   scene.environment = envs.outdoor;
   sun.position.copy(sc.sunDir).multiplyScalar(60);
   setProgress(0.82, 'Preparing the RB20…'); await nextFrame();
   const car = M.carmodel.createCar({ quality: tierName });
   scene.add(car.root);
+  // the car's materials take their sunlight through the building-shade factor (lighting.js)
+  {
+    const seen = new Set();
+    car.root.traverse((o) => { if (!o.isMesh) return; for (const m of Array.isArray(o.material) ? o.material : [o.material]) { if (m && !seen.has(m) && (m.isMeshStandardMaterial || m.isMeshLambertMaterial || m.isMeshPhongMaterial)) { seen.add(m); M.lighting.markCarSun(m); } } });
+  }
   // real-time planar reflections in both mirrors (resolution follows the graphics tier)
   const mirrors = new M.mirrors.Mirrors(renderer, scene, car.root, tierName);
   // live reflections on the car: the large surroundings (sky, buildings, terrain, landmarks,
   // road, barriers, tunnel, water) are drawn into a small cube map round the car
   {
     const RL = M.carenv.REFLECT_LAYER;
-    const reflectNames = new Set(['sky', 'water', 'terrain', 'buildings', 'fairmont', 'props', 'buildingDetail', 'ground', 'tunnelGround', 'barriers', 'tunnelWall', 'tunnelCeiling', 'tunnelShell', 'tunnelLamps']);
+    const reflectNames = new Set(['sky', 'water', 'terrain', 'buildings', 'fairmont', 'props', 'ground', 'tunnelGround', 'barriers', 'tunnelWall', 'tunnelCeiling', 'tunnelShell', 'tunnelLamps']);
     for (const g of [sc.root, tm.group]) g.traverse((o) => { if (o.isMesh && reflectNames.has(o.name)) o.layers.enable(RL); });
   }
   const carEnv = new M.carenv.CarEnv(renderer, scene, car.root, tierName);
@@ -148,7 +166,7 @@ async function setup(M) {
   const auto = new M.autopilot.Autopilot(track, racingLine, { pace: 0.92 });
 
   const app = {
-    THREE, M, renderer, scene, camera, sun, hemi, perf, track, tm, sc, car, veh, rig, controls, timing, hud, fx, audio, auto, mirrors, envs, carEnv,
+    THREE, M, renderer, scene, camera, sun, hemi, perf, track, tm, sc, car, veh, rig, controls, timing, hud, fx, audio, auto, mirrors, envs, carEnv, carShade, shadeMs, carSunShade: 0,
     state: 'loading', simTime: 0, acc: 0, crashT: 0, exposure: 1, daylight: 1, lightS: null,
     LIGHT, lightCols: { sky: new THREE.Color(LIGHT.sky), ground: new THREE.Color(LIGHT.ground), lamp: new THREE.Color(0xffe2bd), floor: new THREE.Color(0x3a3733) },
     cine: { idx: -1, t: 0 }, lastFrame: performance.now(), fpsShown: settings.showFps || DEBUG.fps,
@@ -393,6 +411,12 @@ function frame(app) {
     app.camera.fov = fc.fov || 55; app.camera.near = 0.1; app.camera.updateProjectionMatrix();
   }
   updateLighting(app, dt);
+  // building detail (balconies, awnings, cornices, parapets) only within ~280 m of the camera
+  {
+    const cp = app.camera.position;
+    if (!app._detail) { app._detail = []; app.sc.root.traverse((o) => { if (o.userData && o.userData.lodCenter) app._detail.push(o); }); }
+    for (const m of app._detail) { const [x, z] = m.userData.lodCenter; m.visible = (x - cp.x) ** 2 + (z - cp.z) ** 2 < 280 * 280; }
+  }
   app.sc.waterNormal.offset.x += dt * 0.004; app.sc.waterNormal.offset.y += dt * 0.0025;
   const tB = performance.now();
   if (!DEBUG.norender) {
@@ -450,6 +474,13 @@ function updateLighting(app, dt) {
   app.daylight = dl;
   const L = app.LIGHT;
   sun.intensity = L.sun * (0.03 + 0.97 * dl);
+  // the car in a building's shadow: only its own sunlight fades (a quick, soft transition)
+  {
+    const want = app.carShade ? app.carShade.at(veh.s, veh.d) : 0;
+    const k = dt <= 0 ? 1 : 1 - Math.exp(-dt / 0.06);
+    app.carSunShade += (want - app.carSunShade) * k;
+    app.M.lighting.CAR_SUN.value = 1 - 0.96 * app.carSunShade;
+  }
   hemi.intensity = L.hemi * (1 - 0.30 * tk);        // tunnel: warm luminaire fill
   hemi.color.copy(app.lightCols.sky).lerp(app.lightCols.lamp, tk);
   hemi.groundColor.copy(app.lightCols.ground).lerp(app.lightCols.floor, tk);

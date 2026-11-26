@@ -50,6 +50,31 @@ export function patchHemisphereForPBR(scale = LIGHT.hemiPBR) {
 		#endif`);
 }
 
+// Car sunlight in the shade of buildings: the sun is one light for the whole scene, so the
+// facades round the car must stay sun-lit while the car drives through a building's shadow.
+// Materials flagged with markCarSun() multiply the directional (sun) light by this uniform,
+// driven from the baked building-shade table along the lap (scenery.js).
+export const CAR_SUN = { value: 1 };
+let sunPatched = false;
+function patchCarSun() {
+  if (sunPatched) return;
+  sunPatched = true;
+  const C = THREE.ShaderChunk;
+  const a = 'getDirectionalLightInfo( directionalLight, directLight );';
+  if (!C.lights_fragment_begin.includes(a) || !C.lights_pars_begin.includes('uniform vec3 ambientLightColor;')) { console.warn('lighting: car sun hook not found'); return; }
+  C.lights_fragment_begin = C.lights_fragment_begin.replace(a, a + '\n\t\t#ifdef CAR_SUN\n\t\tdirectLight.color *= carSunScale;\n\t\t#endif');
+  C.lights_pars_begin = C.lights_pars_begin.replace('uniform vec3 ambientLightColor;', 'uniform vec3 ambientLightColor;\n#ifdef CAR_SUN\nuniform float carSunScale;\n#endif');
+}
+export function markCarSun(material) {
+  patchCarSun();
+  material.defines = Object.assign({}, material.defines, { CAR_SUN: '' });
+  const prev = material.onBeforeCompile;
+  material.onBeforeCompile = (sh, r) => { sh.uniforms.carSunScale = CAR_SUN; if (prev) prev.call(material, sh, r); };
+  const key = material.customProgramCacheKey ? material.customProgramCacheKey.bind(material) : null;
+  material.customProgramCacheKey = () => (key ? key() : '') + '|carSun';
+  material.needsUpdate = true;
+}
+
 let tmPatched = false;
 function patchToneMapping() {
   if (tmPatched) return;
@@ -75,6 +100,7 @@ function patchToneMapping() {
 export function setupRenderer(renderer, { toneMapping = 'neutral-notoe' } = {}) {
   patchHemisphereForPBR();
   patchToneMapping();
+  patchCarSun();
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = toneMapping === 'aces' ? THREE.ACESFilmicToneMapping : toneMapping === 'agx' ? THREE.AgXToneMapping
     : toneMapping === 'neutral' ? THREE.NeutralToneMapping : THREE.CustomToneMapping;
