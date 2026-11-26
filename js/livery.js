@@ -139,6 +139,17 @@ export function makeLiveryTexture(size = 2048) {
       bullPath(ctx, left ? bx : bx - bw, by, bw, bh, !left);
       ctx.fill();
     }
+    // sidepod undercut / floor body: the deep, shadowed carbon recess under the sidepod flank
+    // (2024 side photo: the navy flank ends ~0.40 m up at the inlet, sweeping down to the rear)
+    {
+      const edge = [[0.95, 0.43], [1.30, 0.38], [1.80, 0.355], [2.40, 0.32], [2.90, 0.27], [3.30, 0.22]];
+      ctx.fillStyle = '#0d0f14';
+      ctx.beginPath();
+      const [s0x, s0y] = P(Z.fromFA(edge[0][0]), -0.05); ctx.moveTo(s0x, s0y);
+      for (const [fa, yy] of edge) { const [ex, ey] = P(Z.fromFA(fa), yy); ctx.lineTo(ex, ey); }
+      const [s1x, s1y] = P(Z.fromFA(edge[edge.length - 1][0]), -0.05); ctx.lineTo(s1x, s1y);
+      ctx.closePath(); ctx.fill();
+    }
     // red pin stripe along the chassis side
     {
       const [xa] = P(Z.fromFA(0.15), 0), [xb] = P(Z.fromFA(1.25), 0);
@@ -148,22 +159,23 @@ export function makeLiveryTexture(size = 2048) {
     // (sponsor wordmarks are sharp conformal decals: see carmodel.js / decals.js)
     // airbox & engine cover upper: yellow sun -> orange -> red bull -> navy
     {
-      const [xa] = P(Z.fromFA(1.74), 0), [xb] = P(Z.fromFA(3.0), 0);
+      const [xa] = P(Z.fromFA(1.70), 0), [xb] = P(Z.fromFA(3.05), 0);
       const g = ctx.createLinearGradient(xa, 0, xb, 0);
-      g.addColorStop(0, RB_YELLOW); g.addColorStop(0.3, RB_ORANGE); g.addColorStop(0.75, '#e2462b'); g.addColorStop(1, NAVY);
+      g.addColorStop(0, RB_YELLOW); g.addColorStop(0.18, '#f9a31c'); g.addColorStop(0.45, RB_ORANGE); g.addColorStop(0.8, '#e2462b'); g.addColorStop(1, '#c8302a');
       ctx.fillStyle = g;
-      const [, y0] = P(0, 1.05), [, y1] = P(0, 0.62);
+      const [, y0] = P(0, 1.05);
+      // lower edge (2024 side photo): high at the airbox, sweeping down along the cooling gulley
+      const edge = [[1.70, 0.80], [1.85, 0.76], [2.10, 0.74], [2.45, 0.70], [2.80, 0.64], [3.05, 0.60]];
       ctx.beginPath();
-      ctx.moveTo(xa, y0); ctx.lineTo(xb, y0); ctx.lineTo(xb, P(0, 0.64)[1]);
-      ctx.lineTo(P(Z.fromFA(2.3), 0)[0], y1); ctx.lineTo(xa, y1); ctx.closePath(); ctx.fill();
+      ctx.moveTo(xa, y0); ctx.lineTo(xb, y0);
+      for (let i = edge.length - 1; i >= 0; i--) { const [fa, yy] = edge[i]; const [ex, ey] = P(Z.fromFA(fa), yy); ctx.lineTo(ex, ey); }
+      ctx.closePath(); ctx.fill();
       const [bx] = P(Z.fromFA(2.05), 0), [, by] = P(0, 0.86);
       const bw = 0.62 * ppm, bh = 0.24 * ppm;
       ctx.fillStyle = RB_RED;
       bullPath(ctx, left ? bx - bw * 0.15 : bx - bw * 0.85, by, bw, bh, !left);
       ctx.fill();
     }
-    // number 1 on the nose side near the tip (white)
-    { const [x, y] = P(Z.fromFA(-0.62), 0.31); text(ctx, '1', x, y, 0.07 * ppm, '#ffffff'); }
   }
 
   // ---- top view ----
@@ -176,17 +188,7 @@ export function makeLiveryTexture(size = 2048) {
     ctx.fillStyle = g;
     const [, y0] = T(0, -0.30), [, y1] = T(0, 0.30);
     ctx.fillRect(Math.min(xa, xb), y0, Math.abs(xb - xa), y1 - y0);
-    // number 1 on the nose top, readable from the front-left
-    {
-      const [x, y] = T(Z.fromFA(-0.78), 0);
-      ctx.save(); ctx.translate(x, y); ctx.rotate(-Math.PI / 2);
-      text(ctx, '1', 0, 0, 0.11 * ppm, '#ffffff'); ctx.restore();
-    }
-    // red stripe down the chassis centre line to the cockpit
-    {
-      const [x0] = T(Z.fromFA(0.05), 0), [x1] = T(Z.fromFA(1.02), 0), [, yc] = T(0, 0);
-      ctx.fillStyle = RB_RED; ctx.fillRect(Math.min(x0, x1), yc - 0.006 * ppm, Math.abs(x1 - x0), 0.012 * ppm);
-    }
+    // (the car number and the sponsor stack on the chassis / nose top are sharp decals)
     // engine cover top
     const [ea] = T(Z.fromFA(1.74), 0), [eb] = T(Z.fromFA(3.05), 0);
     const g2 = ctx.createLinearGradient(ea, 0, eb, 0);
@@ -249,42 +251,95 @@ export function makeCarbonTextures() {
   return { map, normal };
 }
 
-// Tyre texture (lathe UV: u around, v across the profile; v 0..1 inner bead -> outer bead).
-// Soft compound (Monaco qualifying): red band and lettering on the outer sidewall.
-export function makeTyreTexture(compound = '#e0262b') {
-  const W = 1024, H = 128;
+// Tyre textures (lathe UV: u around the tyre, v across the profile in fixed bands - see
+// tyreGeometry: inner sidewall 0-0.30, shoulders, tread 0.36-0.64, outer sidewall 0.70-1).
+// 2024 Pirelli sidewall (from race photos): "P ZERO" and "PIRELLI" in the compound colour,
+// arched in the upper half of each sidewall and separated by two thick compound-colour arcs;
+// lettering runs clockwise as seen from that side with the letters' tops towards the tread.
+// Soft compound (Monaco qualifying): red. Returns the sharp map, a circumferentially smeared
+// map (blended in with wheel speed so the lettering blurs into rings instead of strobing), and
+// a roughness map (scrubbed tread rougher than the satin sidewall, painted marks smoother).
+export function makeTyreTextures(compound = '#e3262c') {
+  const W = 2048, H = 256;
   const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
-  const ctx = cv.getContext('2d');
-  ctx.fillStyle = '#18181a'; ctx.fillRect(0, 0, W, H);
-  // tread (middle band) slightly lighter & worn
-  const tread0 = H * (6 / 14), tread1 = H * (8 / 14);
-  ctx.fillStyle = '#1f1f21'; ctx.fillRect(0, tread0 - 6, W, tread1 - tread0 + 12);
-  // outer sidewall (v ~ 0.72 .. 0.97) -> canvas rows (flipY): row = (1 - v) * H
-  const row = (v) => (1 - v) * H;
-  for (const [v0, v1, outer] of [[0.74, 0.97, true], [0.03, 0.26, false]]) {
-    const ya = row(v1), yb = row(v0);
-    // compound band
-    ctx.fillStyle = compound;
-    ctx.fillRect(0, ya + (yb - ya) * 0.70, W, (yb - ya) * 0.10);
-    // lettering repeated twice around
-    ctx.fillStyle = compound;
-    ctx.font = `900 ${Math.round((yb - ya) * 0.42)}px Arial Black, Arial, sans-serif`;
-    ctx.textBaseline = 'middle'; ctx.textAlign = 'center';
-    for (let k = 0; k < 2; k++) {
-      const cx = W * (0.25 + 0.5 * k);
-      ctx.save(); ctx.translate(cx, ya + (yb - ya) * 0.38); if (!outer) ctx.scale(-1, 1);
-      ctx.fillText('P ZERO', 0, 0); ctx.restore();
-      ctx.save(); ctx.translate(cx + W * 0.25, ya + (yb - ya) * 0.38); if (!outer) ctx.scale(-1, 1);
-      ctx.fillStyle = '#d9d9d9'; ctx.font = `700 ${Math.round((yb - ya) * 0.26)}px Arial, sans-serif`;
-      ctx.fillText('SOFT', 0, 0); ctx.restore();
-      ctx.fillStyle = compound;
-      ctx.font = `900 ${Math.round((yb - ya) * 0.42)}px Arial Black, Arial, sans-serif`;
-    }
+  const c = cv.getContext('2d');
+  const row = (v) => (1 - v) * H;                    // flipY: v = 1 is the top row
+  // base rubber: satin black sidewalls, dark grey scrubbed tread with graining
+  c.fillStyle = '#121214'; c.fillRect(0, 0, W, H);
+  const tr0 = row(0.70), tr1 = row(0.30);
+  const g = c.createLinearGradient(0, tr0, 0, tr1);
+  g.addColorStop(0, '#17171a'); g.addColorStop(0.12, '#242427'); g.addColorStop(0.5, '#28282b'); g.addColorStop(0.88, '#242427'); g.addColorStop(1, '#17171a');
+  c.fillStyle = g; c.fillRect(0, tr0, W, tr1 - tr0);
+  let seed = 7; const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+  for (let k = 0; k < 2600; k++) {                   // graining / scrub marks across the tread
+    const x = rnd() * W, y = row(0.37 + rnd() * 0.26), l = 4 + rnd() * 26;
+    c.fillStyle = rnd() < 0.5 ? `rgba(70,70,74,${0.05 + rnd() * 0.10})` : `rgba(8,8,9,${0.06 + rnd() * 0.10})`;
+    c.fillRect(x, y, l, 1 + rnd() * 1.5);
   }
-  const t = new THREE.CanvasTexture(cv);
-  t.colorSpace = THREE.SRGBColorSpace;
-  t.anisotropy = 4;
-  return t;
+  // sidewall artwork
+  const drawSide = (vLo, vHi, outer) => {
+    // vLo..vHi: sidewall band from the bead (vLo for inner) to the shoulder
+    const yShoulder = outer ? row(0.715) : row(0.285), yBead = outer ? row(0.985) : row(0.015);
+    const hSide = Math.abs(yBead - yShoulder);
+    const yText = yShoulder + (yBead - yShoulder) * 0.33;        // centre line of the marks
+    const tH = hSide * 0.27, arcH = hSide * 0.17;
+    // circumferential layout (fractions of W): P ZERO, arc, PIRELLI, arc
+    const parts = [['pzero', 0.205], ['gap', 0.028], ['arc', 0.232], ['gap', 0.028], ['pirelli', 0.150], ['gap', 0.028], ['arc', 0.301], ['gap', 0.028]];
+    let x = W * 0.06;
+    for (const [kind, f] of parts) {
+      const w = f * W;
+      if (kind === 'arc') { c.fillStyle = compound; c.fillRect(x, yText - arcH / 2, w, arcH); }
+      if (kind === 'pzero' || kind === 'pirelli') {
+        c.save();
+        c.translate(x + w / 2, yText);
+        // outer sidewall: u runs anticlockwise and v towards the hub as seen from outside, so
+        // the text is drawn rotated 180 deg to read clockwise with the tops towards the tread
+        if (outer) c.rotate(Math.PI);
+        c.fillStyle = compound; c.textAlign = 'center'; c.textBaseline = 'middle';
+        if (kind === 'pzero') {
+          c.font = `italic 900 ${Math.round(tH * 1.25)}px Arial Black, Helvetica Neue, Arial, sans-serif`;
+          const m = c.measureText('P ZERO').width; c.scale(w * 0.96 / m, 1);
+          c.fillText('P ZERO', 0, tH * 0.04);
+        } else {
+          c.font = `900 ${Math.round(tH * 1.0)}px Helvetica Neue, Arial, sans-serif`;
+          const m = c.measureText('PIRELLI').width; c.scale(w * 0.92 / m, 1);
+          c.fillText('PIRELLI', 0, tH * 0.03);
+        }
+        c.restore();
+      }
+      x = (x + w) % W;
+    }
+  };
+  drawSide(0.70, 1.0, true);
+  drawSide(0.0, 0.30, false);
+  const map = new THREE.CanvasTexture(cv);
+  map.colorSpace = THREE.SRGBColorSpace; map.anisotropy = 8;
+  map.wrapS = THREE.RepeatWrapping;
+  // smeared copy: every row replaced by its average colour (a spinning wheel at speed)
+  const cb = document.createElement('canvas'); cb.width = 64; cb.height = H;
+  {
+    const src = c.getImageData(0, 0, W, H).data, bx = cb.getContext('2d'), img = bx.createImageData(64, H);
+    for (let y = 0; y < H; y++) {
+      // average in linear light so the blurred band keeps the right brightness
+      let r = 0, gg = 0, b = 0;
+      for (let xx = 0; xx < W; xx++) { const i = (y * W + xx) * 4; r += (src[i] / 255) ** 2.2; gg += (src[i + 1] / 255) ** 2.2; b += (src[i + 2] / 255) ** 2.2; }
+      const R = Math.round(255 * (r / W) ** (1 / 2.2)), G = Math.round(255 * (gg / W) ** (1 / 2.2)), B = Math.round(255 * (b / W) ** (1 / 2.2));
+      for (let xx = 0; xx < 64; xx++) { const i = (y * 64 + xx) * 4; img.data[i] = R; img.data[i + 1] = G; img.data[i + 2] = B; img.data[i + 3] = 255; }
+    }
+    bx.putImageData(img, 0, 0);
+  }
+  const mapBlur = new THREE.CanvasTexture(cb);
+  mapBlur.colorSpace = THREE.SRGBColorSpace; mapBlur.wrapS = THREE.RepeatWrapping;
+  // roughness: tread 0.93 (scrubbed), sidewall 0.74 (satin moulded rubber), marks 0.55
+  const cr = document.createElement('canvas'); cr.width = W / 4; cr.height = H;
+  {
+    const x = cr.getContext('2d');
+    x.fillStyle = 'rgb(189,189,189)'; x.fillRect(0, 0, W / 4, H);
+    x.fillStyle = 'rgb(237,237,237)'; x.fillRect(0, row(0.68), W / 4, row(0.32) - row(0.68));
+  }
+  const roughness = new THREE.CanvasTexture(cr);
+  roughness.wrapS = THREE.RepeatWrapping;
+  return { map, mapBlur, roughness };
 }
 
 // Wheel cover disc texture (front face): black cover, red outer ring, yellow-green hub ring.

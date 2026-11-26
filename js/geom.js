@@ -288,32 +288,44 @@ export function strut(a, b, chord = 0.06, thick = 0.022, seg = 8) {
 // ---------------------------------------------------------------------------------------------
 // Tyre: lathe profile around the X axis (axle). Returns { tyre, sidewallInner } geometries.
 // r = outer radius, w = width, rimR = rim radius. UV: u around, v across profile (0..1).
+// 18-inch F1 tyre (2022+): flat running surface with a slight crown, ~26 mm shoulder radius,
+// sidewall that flares out of the rim flange and bulges just past the tread width, beads
+// tucked into the rim. UV: u around the tyre, v across the profile with fixed bands so one
+// texture fits front and rear: inner sidewall 0-0.30, inner shoulder 0.30-0.36, tread
+// 0.36-0.64, outer shoulder 0.64-0.70, outer sidewall 0.70-1 (v = 1 at the outer bead).
 export function tyreGeometry(r, w, rimR, radial = 40) {
-  // profile points (radius, axial offset) from the inner rim bead around the tread to the outer bead
-  const hw = w / 2;
-  const prof = [];
-  const shoulder = 0.055, bulge = 0.012;
-  const add = (rad, ax) => prof.push(new THREE.Vector2(rad, ax));
-  add(rimR + 0.002, -hw + 0.03);                  // inner bead
-  add(rimR + 0.03, -hw - bulge * 0.6);
-  add(rimR + (r - rimR) * 0.45, -hw - bulge);      // sidewall bulge
-  add(r - shoulder * 0.9, -hw - bulge * 0.4);
-  add(r - shoulder * 0.35, -hw + 0.006);
-  add(r - 0.008, -hw + shoulder * 0.55);
-  add(r, -hw + shoulder);                          // tread starts
-  add(r + 0.001, 0);
-  add(r, hw - shoulder);
-  add(r - 0.008, hw - shoulder * 0.55);
-  add(r - shoulder * 0.35, hw - 0.006);
-  add(r - shoulder * 0.9, hw + bulge * 0.4);
-  add(rimR + (r - rimR) * 0.45, hw + bulge);
-  add(rimR + 0.03, hw + bulge * 0.6);
-  add(rimR + 0.002, hw - 0.03);
-  // LatheGeometry revolves points (x = radius, y = height) around Y. We want around X.
-  const pts = prof.map(p => new THREE.Vector2(p.x, p.y));
+  const hw = w / 2, Rs = 0.026;
+  const side = [                                     // inner bead -> shoulder start (axial < 0)
+    [rimR + 0.004, -(hw - 0.028)], [rimR + 0.016, -(hw - 0.010)], [rimR + 0.040, -(hw + 0.002)],
+    [rimR + 0.075, -(hw + 0.008)], [r - 0.042, -(hw + 0.007)], [r - Rs, -(hw + 0.001)],
+  ];
+  const shoulder = [];
+  for (let k = 1; k <= 4; k++) {                     // quarter round from the sidewall to the tread
+    const th = Math.PI - (k / 4) * (Math.PI / 2);    // 180 deg (axial out) -> 90 deg (radial)
+    shoulder.push([r - Rs + Rs * Math.sin(th), -(hw - Rs) + (Rs + 0.001) * Math.cos(th)]);
+  }
+  const tread = [[r + 0.0008, -(hw - Rs) * 0.55], [r + 0.0015, 0]];
+  const half = [...side, ...shoulder, ...tread];
+  const prof = [...half, ...half.slice(0, -1).reverse().map(([rad, ax]) => [rad, -ax])];
+  // v bands
+  const nS = side.length, nSh = shoulder.length, nT = tread.length;
+  const seg = (a, b) => Math.hypot(prof[b][0] - prof[a][0], prof[b][1] - prof[a][1]);
+  const bands = [
+    [0, nS - 1, 0.0, 0.30], [nS - 1, nS + nSh - 1, 0.30, 0.36],
+    [nS + nSh - 1, prof.length - nS - nSh, 0.36, 0.64],
+    [prof.length - nS - nSh, prof.length - nS, 0.64, 0.70], [prof.length - nS, prof.length - 1, 0.70, 1.0],
+  ];
+  const vOf = new Array(prof.length).fill(0);
+  for (const [a, b, v0, v1] of bands) {
+    let tot = 0; for (let k = a; k < b; k++) tot += seg(k, k + 1);
+    let acc = 0; vOf[a] = v0;
+    for (let k = a; k < b; k++) { acc += seg(k, k + 1); vOf[k + 1] = v0 + (v1 - v0) * (tot > 0 ? acc / tot : 1); }
+  }
+  const pts = prof.map(([rad, ax]) => new THREE.Vector2(rad, ax));
   const g = new THREE.LatheGeometry(pts, radial);
-  g.rotateZ(-Math.PI / 2); // Y axis -> X axis
-  g.computeVertexNormals();
+  const uv = g.attributes.uv, n = pts.length;
+  for (let i = 0; i <= radial; i++) for (let j = 0; j < n; j++) uv.setY(i * n + j, vOf[j]);
+  g.rotateZ(-Math.PI / 2); // Y axis -> X axis (LatheGeometry's own normals are seam-free)
   return g;
 }
 

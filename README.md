@@ -9,9 +9,9 @@ vendored.
 
 ![Default onboard T-cam, approaching Casino Square](docs/img/onboard-tcam-casino.webp)
 
-| Loading | Steering wheel | Mirror (live reflection) |
+| Cockpit | Halo markings | In the tunnel |
 |---|---|---|
-| ![F1-27 loading screen](docs/img/ui-loading.webp) | ![RB20 steering wheel with display and shift LEDs](docs/img/cockpit-wheel.webp) | ![Right mirror from the driver's eye](docs/img/mirror-right.webp) |
+| ![Cockpit view: halo with its 2024 markings, wheel, both mirrors](docs/img/cockpit-sun.webp) | ![Halo from the front: Sui on both arms, ORACLE on the chassis](docs/img/rb20-halo-markings.webp) | ![RB20 in the Monaco tunnel](docs/img/rb20-tunnel.webp) |
 
 ## Driving
 
@@ -41,9 +41,9 @@ Your best valid lap is saved on the device.
 
 | Area | Highlights |
 |---|---|
-| **Car** (`js/carspec.js`, `js/carmodel.js`, `js/livery.js`, `js/decals.js`) | Procedural RB20 built from a measured dimension sheet ([docs/CAR_DIMENSIONS.md](docs/CAR_DIMENSIONS.md)): lofted survival cell with real cockpit opening, nose cross-sections, 4-element front wing with endplates, pull-rod/push-rod suspension on real pick-ups, steering about the kingpin, carbon aero halo, RB20 sidepods with the deep undercut, inlet duct and overbite lip, floor fences, front brake-duct scoops and rear duct winglets, diffuser, Monaco rear wing + beam wing, soft tyres with rim lips. Sponsor wordmarks are **conformal decals** projected onto the body triangles with their own high-resolution textures (sharp from the onboard cameras). |
-| **Cockpit** (`js/cockpit.js`) | RB20-style steering wheel: carbon-weave body with clearcoat, suede grips, a live **digital display** (gear, speed, rpm bar, ERS, brake bias, lock warning), **15 shift LEDs** (green → red → blue, flashing at the limiter) and 6 side LEDs, labelled buttons, knurled rotaries, thumb wheels, shift and clutch paddles. **Gloved hands** (knit glove texture, stitched seams, wrist cuff and strap) grip the wheel and turn with it; the **arms follow by two-bone IK** from the shoulders, so nothing detaches or stretches. |
-| **Mirrors** (`js/mirrors.js`) | Real-time rear-view mirrors: each 200 × 50 mm glass is a planar reflector rendered every other frame into its own WebGL render target from the viewer's eye mirrored in the glass plane, through an off-axis frustum that passes exactly through the glass (perspective-correct for T-cam, cockpit and chase cameras). Mounted on thin blade stays above the sidepod inlets. |
+| **Car** (`js/carspec.js`, `js/carmodel.js`, `js/halo.js`, `js/livery.js`, `js/decals.js`, `js/envmap.js`) | Procedural RB20 built from a measured dimension sheet and matched to 2024 photos ([docs/CAR_DIMENSIONS.md](docs/CAR_DIMENSIONS.md)): lofted survival cell with real cockpit opening, nose cross-sections, 4-element carbon front wing, pull-rod/push-rod suspension on real pick-ups, steering about the kingpin, RB20 sidepods (inlet just behind the mirrors) with the deep undercut, floor, diffuser, Monaco rear wing + beam wing. **Halo**: satin-black faired hoop with a rounded D section, swept centre pillar and legs blending into the bodywork, carrying the 2024 markings seen in photos (Sui, TAG Heuer, ORACLE, BYBIT, ZOOM, @REDBULLRACING) as a conformal skin. **Tyres**: flat running surface, rounded shoulders, Pirelli P ZERO sidewall art that blurs into rings with speed. Sponsor wordmarks are sharp conformal decals in one atlas. Paint, glossy clear-coated carbon, satin halo, rubber and metal respond differently to an HDR sky over Monaco and to the tunnel's lamps. |
+| **Cockpit** (`js/cockpit.js`) | Driver's eye at the height the 2024 photos give (helmet top level with the halo arm) with a helmet-camera field of view: halo crossbar and markings at the top, pillar ahead of the nose, both front tyres, both mirrors at the frame edges. RB20-style wheel: carbon body, suede grips, live **display** (gear, speed, rpm bar, ERS, brake bias / LOCK), **15 shift LEDs** with glow and 6 side LEDs, labelled buttons, rotaries, thumb wheels, paddles. **Gloved hands** built on the grip surface itself (fingers in moulded grooves) turn with the wheel; **arms by two-bone IK**. The wheel turns the same way as the front tyres (4.4 : 1). |
+| **Mirrors** (`js/mirrors.js`) | Real-time rear-view mirrors at the 2024 position (200 × 50 mm glass, 1.13 m behind the front axle, on blade stays above the sidepod inlets), aimed from the driver's eye and slightly convex: the track behind with a sliver of the car's flank. Each glass is a planar reflector rendered into its own WebGL render target through an off-axis frustum that passes exactly through the glass, on alternate frames, skipped when off-screen. |
 | **Camera** (`js/cameras.js`) | Broadcast **T-cam on the roll hoop** (1.885 m behind the front axle, 0.985 m high) is the default; driver-eye cockpit and chase cams. Rigidly anchored to the chassis; wide-screen FOV keeps 16:9 proportions. |
 | **Audio** (`js/engine-worklet.js`, `js/audio.js`) | Synthesised V6 turbo-hybrid in an AudioWorklet driven by rpm, load and gear (shift cuts, blips, overrun, MGU-K, turbo), tyre scrub, wind, kerbs, scrapes, impacts and tunnel reverb. See [docs/TRACK_AND_AUDIO.md](docs/TRACK_AND_AUDIO.md). |
 | **Circuit** (`js/track-core.js`, `js/corridor.js`, `js/trackmesh.js`, `js/scenery.js`, `js/textures.js`) | Geo-referenced centre line scaled to 3,337 m, 43 m of elevation, kerbs, armco and catch fences, braking boards, pit lane, harbour with yachts, grandstands, Casino, Fairmont, the Rock and the Palace. **PBR street asphalt** (aggregate, binder, normal and roughness maps; 40 m macro variation so the tile never repeats), rubber laid along the racing line, braking and lock-up marks into every braking zone (generated from the speed profile), traction marks out of the corners, saw-cut repair patches, crack-seal lines, manhole covers and gutter grates; painted kerbs and lines. A track exclusion corridor keeps every building, the terrain and all props off the circuit. The tunnel has a continuous slab ceiling, beams, LED luminaire rows and smooth light / exposure transitions. |
@@ -73,11 +73,22 @@ node tools/sim-lap.mjs 3              # headless physics laps with the test driv
 node tools/track-report.mjs           # circuit geometry report
 node tools/shots.mjs out side,front,top,rear34,tcam,cockpit,halo34,wheelfront   # model validation renders
 node tools/perf-probe.mjs             # draw calls, triangles, CPU per frame, memory
+node tools/decal-shimmer-test.mjs     # halo markings: shimmer under sub-pixel motion vs a 16x supersampled reference
+node tools/lap-check.mjs out          # 12 points round the lap: halo, mirrors from the driver's eye, car (contact sheet)
+node tools/material-check.mjs         # paint / carbon / rubber / halo distinguishable in sun, shade and the tunnel
+node tools/handling-test.mjs          # braking (no ABS), trail braking, launches, corner exits
 node tools/capture.mjs                # promotional stills rendered from the game (assets/)
 ```
 
 Debug URL parameters: `?start=drive`, `?cam=chase|cockpit`, `?q=low|medium|high`, `?fps=1`,
 `?autopilot=1`, `?noaudio=1`, `?norender=1`, `?s=<lap metre>` (start position), `?cine=<n>`.
+
+**Benchmark on a phone:** open the game with `?bench=1&cam=cockpit` (or `cam=tcam`), optionally
+`&laps=2` or `&secs=60`. The test driver laps Monaco with everything rendered and the adaptive
+resolution switched off; at the end a panel shows the device, the GPU, the render size, the
+average FPS, the 1 % low, frame-time percentiles and draw calls (also logged to the console as
+`BENCH {...}`). On iPhone, use Safari (or the Home Screen app) with the phone plugged in or
+charged, and run it twice: the first run also warms up the shader cache.
 
 See [docs/TESTING.md](docs/TESTING.md) for the test matrix, performance numbers and what still
 needs a physical-phone check.

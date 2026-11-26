@@ -2,13 +2,14 @@
 // views, the driving loop (240 Hz physics), pause / focus handling, reset and restart.
 import { buildTrack } from './track-core.js';
 import { settings, saveSettings, clearBest, loadBest, fmtTime } from './settings.js';
+import { startBench, benchFrame } from './bench.js';
 
 const $ = (id) => document.getElementById(id);
 const P = new URLSearchParams(location.search);
 const DEBUG = {
   autopilot: P.get('autopilot') === '1', shot: P.get('shot'), noaudio: P.get('noaudio') === '1',
   start: P.get('start'), cam: P.get('cam'), quality: P.get('q'), fps: P.get('fps') === '1', s: P.get('s'),
-  norender: P.get('norender') === '1', cine: P.get('cine'),
+  norender: P.get('norender') === '1', cine: P.get('cine'), bench: P.get('bench') === '1', laps: +(P.get('laps') || 1), secs: +(P.get('secs') || 150),
 };
 
 // ---------------------------------------------------------------------------------------------
@@ -52,14 +53,14 @@ async function boot() {
     import('./carmodel.js'), import('./carspec.js'), import('./physics.js'), import('./autopilot.js'),
   ]);
   setProgress(0.40, 'Loading circuit…');
-  const [trackmesh, scenery, corridor, cameras, controls, timing, hud, fx, audio, perf, env, mirrors] = await Promise.all([
+  const [trackmesh, scenery, corridor, cameras, controls, timing, hud, fx, audio, perf, envmap, mirrors] = await Promise.all([
     import('./trackmesh.js'), import('./scenery.js'), import('./corridor.js'), import('./cameras.js'), import('./controls.js'), import('./timing.js'),
-    import('./hud.js'), import('./fx.js'), import('./audio.js'), import('./perf.js'), import('three/addons/RoomEnvironment.js'),
+    import('./hud.js'), import('./fx.js'), import('./audio.js'), import('./perf.js'), import('./envmap.js'),
     import('./mirrors.js'),
   ]);
   setProgress(0.48, 'Building circuit…');
   await nextFrame();
-  App = await setup({ carmodel, carspec, physics, autopilot, trackmesh, scenery, corridor, cameras, controls, timing, hud, fx, audio, perf, env, mirrors });
+  App = await setup({ carmodel, carspec, physics, autopilot, trackmesh, scenery, corridor, cameras, controls, timing, hud, fx, audio, perf, envmap, mirrors });
 }
 
 async function setup(M) {
@@ -72,6 +73,7 @@ async function setup(M) {
   const scene = new THREE.Scene();
   scene.fog = new THREE.FogExp2(0xd7e2e8, 0.00085);
   const camera = new THREE.PerspectiveCamera(55, innerWidth / innerHeight, 0.03, 6000);
+  camera.layers.enable(1);                       // cockpit-only objects (skipped by the mirrors)
 
   const tierName = DEBUG.quality || (settings.gfx === 'auto' ? M.perf.autoTier() : settings.gfx);
   // lights
@@ -91,10 +93,9 @@ async function setup(M) {
   addEventListener('resize', resize);
   visualViewport?.addEventListener('resize', resize);
 
-  // environment (reflections on the car & water) from a sky-like room
-  const pm = new THREE.PMREMGenerator(renderer);
-  const envTex = pm.fromScene(new M.env.RoomEnvironment(), 0.04).texture;
-  scene.environment = envTex;
+  // environment (reflections and image-based light on the car & water): outdoor HDR sky over
+  // Monaco, and a tunnel version swapped in under the tunnel roof; built once the sun
+  // direction is known (after the scenery)
   scene.environmentIntensity = 0.75;
   setProgress(0.52, 'Building circuit…'); await nextFrame();
 
@@ -108,6 +109,8 @@ async function setup(M) {
   setProgress(0.70, 'Building Monaco…'); await nextFrame();
   const sc = M.scenery.buildScenery(track, { quality: tierName, renderer, corridor });
   scene.add(sc.root);
+  const envs = { outdoor: M.envmap.outdoorEnv(renderer, sc.sunDir), tunnel: M.envmap.tunnelEnv(renderer) };
+  scene.environment = envs.outdoor;
   sun.position.copy(sc.sunDir).multiplyScalar(60);
   setProgress(0.82, 'Preparing the RB20…'); await nextFrame();
   const car = M.carmodel.createCar({ quality: tierName });
@@ -133,7 +136,7 @@ async function setup(M) {
   const auto = new M.autopilot.Autopilot(track, racingLine, { pace: 0.92 });
 
   const app = {
-    THREE, M, renderer, scene, camera, sun, hemi, perf, track, tm, sc, car, veh, rig, controls, timing, hud, fx, audio, auto, mirrors,
+    THREE, M, renderer, scene, camera, sun, hemi, perf, track, tm, sc, car, veh, rig, controls, timing, hud, fx, audio, auto, mirrors, envs,
     state: 'loading', simTime: 0, acc: 0, crashT: 0, exposure: 1, daylight: 1, lightS: null,
     lightCols: { sky: new THREE.Color(0xcfe2ff), ground: new THREE.Color(0x6b6356), lamp: new THREE.Color(0xffe2bd), floor: new THREE.Color(0x3a3733) },
     cine: { idx: -1, t: 0 }, lastFrame: performance.now(), fpsShown: settings.showFps || DEBUG.fps,
@@ -287,7 +290,7 @@ function syncCarVisual(app) {
   car.root.rotation.set(veh.yRoadPitch, veh.psi, -veh.yRoadRoll, 'YXZ');
   const ws = veh.wheels;
   car.update({
-    steerL: veh.deltaL, steerR: veh.deltaR, steer: veh.delta,
+    steerL: veh.deltaL, steerR: veh.deltaR, steer: veh.delta, speed: veh.speed,
     wheelSpin: ws.map(w => w.spin),
     travel: ws.map(w => w.travel),
     pitch: veh.pitch, roll: veh.roll, heave: 0,
@@ -384,7 +387,9 @@ function frame(app) {
   const tC = performance.now();
   const st = app.stats || (app.stats = { simMs: 0, renderMs: 0, maxSimMs: 0 });
   st.simMs += (tB - tA - st.simMs) * 0.05; st.renderMs += (tC - tB - st.renderMs) * 0.05; st.maxSimMs = Math.max(st.maxSimMs * 0.999, tB - tA);
-  app.perf.frame(dtMs, settings.gfx === 'auto' && !DEBUG.quality);
+  if (app.rig.mode !== app.__hudCam) { app.__hudCam = app.rig.mode; $('hud').classList.toggle('cockpitView', app.rig.mode === 'cockpit'); }
+  app.perf.frame(dtMs, settings.gfx === 'auto' && !DEBUG.quality && !app.benchNoAdapt);
+  if (app.bench) benchFrame(app, dtMs);
   requestAnimationFrame(() => frame(app));
 }
 
@@ -416,10 +421,13 @@ function updateLighting(app, dt) {
   const tk = 1 - dl;
   app.daylight = dl;
   sun.intensity = 2.7 * (0.03 + 0.97 * dl);
-  hemi.intensity = 0.85 * (1 - 0.42 * tk);
+  hemi.intensity = 0.85 * (1 - 0.30 * tk);          // tunnel: warm luminaire fill
   hemi.color.copy(app.lightCols.sky).lerp(app.lightCols.lamp, tk);
   hemi.groundColor.copy(app.lightCols.ground).lerp(app.lightCols.floor, tk);
-  scene.environmentIntensity = 0.75 * (1 - 0.6 * tk);
+  // reflections: the outdoor sky until the camera is well under the roof, then the tunnel
+  const envWanted = tk > 0.55 ? app.envs.tunnel : app.envs.outdoor;
+  if (scene.environment !== envWanted) scene.environment = envWanted;
+  scene.environmentIntensity = tk > 0.55 ? 0.75 * (0.3 + 0.3 * tk) : 0.75 * (1 - 0.6 * tk);
   const target = 1.0 + 0.32 * tk;            // the tunnel stays a little darker than daylight
   const jump = app.lightS === null || Math.abs(track.deltaS(app.lightS, sCam)) > 40;
   if (dt <= 0 || jump) app.exposure = target;                 // camera cut / teleport: no lag
@@ -514,8 +522,9 @@ boot().then(() => {
   setProgress(1, 'Ready');
   if (DEBUG.shot) { setupShot(app, DEBUG.shot); return; }
   app.lastFrame = performance.now();
-  if (DEBUG.start === 'drive') startDriving(app);
+  if (DEBUG.start === 'drive' || DEBUG.bench) startDriving(app);
   else enterMenu(app);
+  if (DEBUG.bench) startBench(app, { cam: DEBUG.cam || 'tcam', laps: DEBUG.laps, secs: DEBUG.secs });
   requestAnimationFrame(() => frame(app));
   // cinematic hand-over once the brand sequence has played (>= 2.7 s after the page started):
   // the brand fades, the black lifts, the menu / car fades in

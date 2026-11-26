@@ -64,6 +64,19 @@ const FX = 0.125, FY = 0.08, PPM = 4096;
 function faceToPx(x, y) { return [(x + FX) * PPM, (FY - y) * PPM]; }
 
 // ---------------------------------------------------------------------------------------------
+// grip surface shared by the grip mesh, the palm and the fingers (wheel frame, metres):
+// elliptical section (width GRIP_RW across, depth GRIP_RD fore-aft), toed in at the top,
+// fuller in the middle, with moulded grooves under the four fingers
+const GY0 = -0.074, GY1 = 0.068, GRIP_Z = -0.003, GRIP_RW = 0.0195, GRIP_RD = 0.0225;
+const FING = [[0.035, 0.0086, -2.55], [0.0135, 0.0091, -2.75], [-0.0075, 0.0088, -2.62], [-0.0275, 0.0078, -2.30]];   // [height, finger radius, wrap angle]
+const gripCX = (sx, y) => sx * (0.140 - 0.006 * (y - GY0) / (GY1 - GY0));
+function gripScale(y) {
+  const t = Math.max(0, Math.min(1, (y - GY0) / (GY1 - GY0)));
+  let s = 0.92 + 0.12 * Math.sin(Math.PI * t);
+  for (const [fy] of FING) s -= 0.05 * Math.exp(-((y - fy) ** 2) / (2 * 0.0042 * 0.0042));
+  return s;
+}
+
 export function buildCockpit({ chassis, carbonMap, carbonNormal, hi, q, helmetCentreFA }) {
   const W = new THREE.Group(); W.name = 'steeringWheel';
   // column end in front of the driver, tilted back like the real column (~24 deg)
@@ -108,14 +121,17 @@ export function buildCockpit({ chassis, carbonMap, carbonNormal, hi, q, helmetCe
   add(W, bodyGeo, carbonMat, 'swBody');
   const FACE_Z = 0.009 + 0.003;                      // front face plane of the body
 
-  // ---- grips (suede over a carbon core), slightly toed in at the top ---------------------
+  // ---- grips (suede over a carbon core), slightly toed in at the top, with moulded finger
+  // grooves at the driver's finger positions. The same surface function places the palm and the
+  // fingers, so they touch the grip everywhere (no gaps, no intersections) ------------------
   for (const sx of [-1, 1]) {
     const pts = [];
-    for (let i = 0; i <= 10; i++) {
-      const t = i / 10, y = -0.074 + 0.142 * t;
-      pts.push([sx * (0.140 - 0.006 * t), y, -0.003]);
+    const NG = hi ? 48 : 24;
+    for (let i = 0; i <= NG; i++) {
+      const t = i / NG, y = GY0 + (GY1 - GY0) * t;
+      pts.push([gripCX(sx, y), y, GRIP_Z]);
     }
-    const g = sweep(pts, { rx: 0.0225, ry: 0.0195, seg: hi ? 16 : 10, scaleFn: (t) => 0.92 + 0.12 * Math.sin(Math.PI * t) - 0.05 * Math.sin(Math.PI * 4 * t) * (t > 0.2 && t < 0.85 ? 1 : 0) });
+    const g = sweep(pts, { rx: GRIP_RD, ry: GRIP_RW, seg: hi ? 20 : 12, scaleFn: (t) => gripScale(GY0 + (GY1 - GY0) * t) });
     const uv = new Float32Array(g.attributes.position.count * 2);
     const p = g.attributes.position;
     for (let i = 0; i < p.count; i++) { uv[i * 2] = p.getY(i) * 20; uv[i * 2 + 1] = Math.atan2(p.getZ(i), p.getX(i) - sx * 0.14) * 2; }
@@ -154,7 +170,24 @@ export function buildCockpit({ chassis, carbonMap, carbonNormal, hi, q, helmetCe
   const m4 = new THREE.Matrix4();
   ledPos.forEach(([x, y], i) => { m4.makeTranslation(x, y, FACE_Z + 0.0005); leds.setMatrixAt(i, m4); });
   W.add(leds);
-  const ledOff = new THREE.Color(0x121316), ledCol = { g: new THREE.Color(0x19ff55), r: new THREE.Color(0xff1a1a), b: new THREE.Color(0x4a6bff), a: new THREE.Color(0xffa400), w: new THREE.Color(0xdde6ff) };
+  // glow: an additive soft halo in front of each LED (black = invisible when the LED is off),
+  // so lit LEDs bloom and stay readable in direct sun like the real ones on onboard footage
+  const glowTex = (() => {
+    const N = 64, cv = document.createElement('canvas'); cv.width = cv.height = N;
+    const c = cv.getContext('2d'), g = c.createRadialGradient(N / 2, N / 2, 0, N / 2, N / 2, N / 2);
+    g.addColorStop(0, 'rgba(255,255,255,1)'); g.addColorStop(0.18, 'rgba(255,255,255,0.85)'); g.addColorStop(0.42, 'rgba(255,255,255,0.22)'); g.addColorStop(1, 'rgba(255,255,255,0)');
+    c.fillStyle = g; c.fillRect(0, 0, N, N);
+    const t = new THREE.CanvasTexture(cv); t.colorSpace = THREE.SRGBColorSpace; return t;
+  })();
+  const glows = new THREE.InstancedMesh(new THREE.PlaneGeometry(0.0145, 0.0145), new THREE.MeshBasicMaterial({
+    map: glowTex, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false,
+  }), ledN);
+  glows.name = 'swLedGlow'; glows.renderOrder = 4; glows.frustumCulled = false;
+  ledPos.forEach(([x, y], i) => { m4.makeTranslation(x, y, FACE_Z + 0.0042); glows.setMatrixAt(i, m4); glows.setColorAt(i, new THREE.Color(0, 0, 0)); });
+  W.add(glows);
+  // lens colours: smoked dark lens when off; lit LEDs saturated and bright
+  const ledOff = new THREE.Color(0x1b1d22), ledCol = { g: new THREE.Color(0x2bff6a), r: new THREE.Color(0xff2a22), b: new THREE.Color(0x5a7cff), a: new THREE.Color(0xffae1a), w: new THREE.Color(0xeef2ff) };
+  const glowOff = new THREE.Color(0, 0, 0), glowK = 0.75, tmpC = new THREE.Color();
   for (let i = 0; i < ledN; i++) leds.setColorAt(i, ledOff);
   // LED housings (dark strip)
   {
@@ -318,7 +351,13 @@ export function buildCockpit({ chassis, carbonMap, carbonNormal, hi, q, helmetCe
     return g;
   };
   gloveMat.side = THREE.DoubleSide; cuffMat.side = THREE.DoubleSide; strapMat.side = THREE.DoubleSide;
-  const GRIP_R = 0.0222, GRIP_Z = -0.003;
+  // point on the grip surface (+ offset along its normal) at angle a and height y
+  const onGrip = (sx, a, y, off) => {
+    const sc = gripScale(y), Rw = GRIP_RW * sc, Rd = GRIP_RD * sc, c = Math.cos(a), si = Math.sin(a);
+    let nx = sx * c / Rw, nz = si / Rd; const l = Math.hypot(nx, nz); nx /= l; nz /= l;
+    return [gripCX(sx, y) + sx * c * Rw + nx * off, y, GRIP_Z + si * Rd + nz * off];
+  };
+  const GRIP_R = 0.0222;
   // angle convention around a grip (in the face plane x-z): 0 = outer side, +pi/2 = towards
   // the driver (front face), -pi/2 = behind the wheel, -pi = inner side
   const around = (sx, gx, a, r, y) => [gx + sx * Math.cos(a) * r, y, GRIP_Z + Math.sin(a) * r];
@@ -336,12 +375,12 @@ export function buildCockpit({ chassis, carbonMap, carbonNormal, hi, q, helmetCe
         const t = j / NY, y = Y0 + (Y1 - Y0) * t;
         const round = Math.sin(Math.PI * Math.min(1, Math.max(0, t * 1.15 - 0.02))) ** 0.45;   // taper top / bottom
         const th = Math.max(0.004, TH * (0.55 + 0.45 * round));
-        const r0 = GRIP_R + 0.0008, r1 = r0 + th;
+        const o0 = 0.0005, o1 = o0 + th;                // glove thickness over the grip surface
         const ring = [];
-        for (let k = 0; k <= NA; k++) { const a = A1 + (A0 - A1) * (k / NA); ring.push(around(sx, gx, a, r1, y)); }     // outer (back of hand)
-        for (let k = 1; k <= 3; k++) { const a = A0 - 0.06 * Math.sin(k / 4 * Math.PI); const r = r1 - th * k / 4; ring.push(around(sx, gx, a, r, y)); }
-        for (let k = 0; k <= NA; k++) { const a = A0 + (A1 - A0) * (k / NA); ring.push(around(sx, gx, a, r0, y)); }     // inner (on the grip)
-        for (let k = 1; k <= 3; k++) { const a = A1 + 0.08 * Math.sin(k / 4 * Math.PI); const r = r0 + th * k / 4; ring.push(around(sx, gx, a, r, y)); }
+        for (let k = 0; k <= NA; k++) { const a = A1 + (A0 - A1) * (k / NA); ring.push(onGrip(sx, a, y, o1)); }     // outer (back of hand)
+        for (let k = 1; k <= 3; k++) { const a = A0 - 0.06 * Math.sin(k / 4 * Math.PI); ring.push(onGrip(sx, a, y, o1 - th * k / 4)); }
+        for (let k = 0; k <= NA; k++) { const a = A0 + (A1 - A0) * (k / NA); ring.push(onGrip(sx, a, y, o0)); }     // inner (on the grip)
+        for (let k = 1; k <= 3; k++) { const a = A1 + 0.08 * Math.sin(k / 4 * Math.PI); ring.push(onGrip(sx, a, y, o0 + th * k / 4)); }
         ring.forEach(([x, yy, z], k) => { pos.push(x, yy, z); uv.push(t * 1.5, k / M); });
       }
       for (let j = 0; j < NY; j++) for (let k = 0; k < M; k++) {
@@ -362,17 +401,15 @@ export function buildCockpit({ chassis, carbonMap, carbonNormal, hi, q, helmetCe
     }
     // fingers: from the knuckles at the back-outer edge of the palm, round the back of the grip
     // to the inner side, fingertips resting against the paddles
-    const FING = [[0.035, 0.0086, -2.55], [0.0135, 0.0091, -2.75], [-0.0075, 0.0088, -2.62], [-0.0275, 0.0078, -2.30]];
     for (const [y, rf, aEnd] of FING) {
-      const R = GRIP_R + rf * 0.92;
       const pts = [];
       const a0 = -0.12;
-      for (let k = 0; k <= 16; k++) {
-        const t = k / 16, a = a0 + (aEnd - a0) * t;
-        const p = around(sx, gx, a, R + 0.003 * Math.sin(t * Math.PI), y + 0.0015 * Math.sin(t * Math.PI));
-        pts.push(p);
-      }
       const knuckles = (t) => rf * (1 + 0.09 * Math.exp(-((t - 0.33) ** 2) / 0.003) + 0.07 * Math.exp(-((t - 0.66) ** 2) / 0.003) - 0.12 * Math.max(0, t - 0.85) / 0.15);
+      for (let k = 0; k <= 20; k++) {
+        const t = k / 20, a = a0 + (aEnd - a0) * t;
+        // centreline one finger radius off the grip surface: the finger pads touch the grip
+        pts.push(onGrip(sx, a, y, knuckles(t) * 0.97 + 0.0003));
+      }
       add(H, tube(pts, knuckles, hi ? 10 : 7, ['flat', 'round']), gloveMat, 'finger');
     }
     // thumb: from the front edge of the palm over the face towards the top buttons
@@ -406,7 +443,7 @@ export function buildCockpit({ chassis, carbonMap, carbonNormal, hi, q, helmetCe
     const upper = add(armsG, seg(0.043, 0.037), suitMat, 'upperArm');
     const fore = add(armsG, seg(0.037, 0.031), suitMat, 'forearm');
     const elbow = add(armsG, new THREE.SphereGeometry(0.038, 12, 8), suitMat, 'elbow');
-    const shoulder = new THREE.Vector3(h.sx * 0.180, 0.488, q(helmetCentreFA + 0.035));
+    const shoulder = new THREE.Vector3(h.sx * 0.180, 0.522, q(helmetCentreFA + 0.035));
     return { h, upper, fore, elbow, shoulder };
   });
   const LU = 0.28, LF = 0.26;                         // upper arm, forearm (to the glove cuff)
@@ -488,9 +525,14 @@ export function buildCockpit({ chassis, carbonMap, carbonNormal, hi, q, helmetCe
       if (flash) c = ledCol.b;
       else if (i < n) c = i < 5 ? ledCol.g : i < 10 ? ledCol.r : ledCol.b;
       leds.setColorAt(i, c);
+      glows.setColorAt(i, c === ledOff ? glowOff : tmpC.copy(c).multiplyScalar(glowK));
     }
-    for (let k = 0; k < 6; k++) leds.setColorAt(15 + k, st.lock && Math.floor(st.time * 10) % 2 === 0 ? ledCol.a : st.gear === 'N' ? ledCol.w : ledOff);
-    leds.instanceColor.needsUpdate = true;
+    for (let k = 0; k < 6; k++) {
+      const c = st.lock && Math.floor(st.time * 10) % 2 === 0 ? ledCol.a : st.gear === 'N' ? ledCol.w : ledOff;
+      leds.setColorAt(15 + k, c);
+      glows.setColorAt(15 + k, c === ledOff ? glowOff : tmpC.copy(c).multiplyScalar(glowK));
+    }
+    leds.instanceColor.needsUpdate = true; glows.instanceColor.needsUpdate = true;
     // display at ~15 Hz (only when something visible changed)
     dispAcc += st.dt || 0;
     const key = `${st.gear}|${st.kmh}|${Math.round(st.rpm / 50)}|${Math.round(st.ers * 50)}|${st.lock ? 1 : 0}|${st.limiter ? 1 : 0}|${Math.round(st.bias * 1000)}`;
@@ -500,7 +542,7 @@ export function buildCockpit({ chassis, carbonMap, carbonNormal, hi, q, helmetCe
   drawDisplay({ rpm: 4300, gear: 'N', kmh: 0, ers: 1, bias: 0.57, lock: false, limiter: false });
   // draw-call reduction: the wheel's static parts and each glove's parts are merged per
   // material (the display, LEDs and printed labels stay separate: they change or blend)
-  mergeStatic(W, new Set(['swScreen', 'swLeds', 'swLabels']));
+  mergeStatic(W, new Set(['swScreen', 'swLeds', 'swLedGlow', 'swLabels']));
   for (const h of hands) mergeStatic(h.group);
   solveArms();
   return { wheel: W, arms: armsG, update, hands };

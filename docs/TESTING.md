@@ -18,6 +18,10 @@ the size of the Pro Max class including the iPhone 18 Pro Max) and touch emulati
 | Tunnel transitions (`tools/tunnel-test.mjs`) | Chromium, autopilot through the tunnel | smooth: max 0.011 exposure change per frame |
 | Physics laps (`tools/sim-lap.mjs 2`) | Node.js | autopilot laps 80.988 s (out-lap start) and 79.683 s, 0 contacts, threshold braking without ABS |
 | Smoke (`tools/smoke.mjs`) | Chromium | loads, drives, audio running, no errors |
+| Halo markings shimmer (`tools/decal-shimmer-test.mjs`) | Chromium, rendered game, cockpit + T-cam, sun / shade / tunnel | **4 / 4** pass: within the supersampled ideal |
+| Lap check (`tools/lap-check.mjs`) | Chromium, 12 points round the lap at racing speed | **12 / 12**: both mirrors show a live, varied scene from the driver's eye |
+| Materials in every light (`tools/material-check.mjs`) | Chromium, sun-lit side, shaded side, tunnel | all paint / carbon / rubber / halo pairs distinguishable (Delta-E 3.6–29) |
+| **Frame rate on an iPhone** | **not measured: no iPhone or GPU was available to this session** | run `?bench=1` on the phone (see *Performance*) |
 
 Run them yourself:
 
@@ -201,49 +205,91 @@ before the chicane / Sainte Dévote / hairpin, traction marks after the hairpin,
 patches, seams and covers, saturated painted kerbs, unchanged tunnel brightness. Overlays sit
 6 mm above the road with polygon offset — no z-fighting at any distance checked.
 
-## Performance (measured in emulation)
+## Halo markings: sharpness and shimmer (`tools/decal-shimmer-test.mjs`)
 
-Same container, same software renderer, back-to-back runs of the previous release (04528c3)
-and this build (`tools/perf-probe.mjs`, T-cam, High tier, 10 points round the lap):
+Shimmer is texture aliasing that shows when the camera moves by fractions of a pixel (vibration,
+steering, bumps). In the rendered game the test renders each spot 16 times with sub-pixel
+projection offsets (-0.5..0.5 px) and compares every frame with the unshifted frame resampled
+at the same offset - what a correctly filtered image does under that motion. The mean residual
+over the ~3,200-4,150 pixels the halo markings cover is the shimmer; references: the same
+markings rendered 16x supersampled (practically alias-free) and without mipmaps (what shimmering
+decals look like).
 
-| Measure | Previous release | Now |
+| Spot | Game | Supersampled ideal | Unfiltered |
+|---|---|---|---|
+| Sun, cockpit | 0.0363 | 0.0400 | 0.0749 |
+| Sun, T-cam | 0.0661 | 0.0769 | 0.1484 |
+| Shade, cockpit | 0.0416 | 0.0461 | 0.0862 |
+| Tunnel, cockpit | 0.0352 | 0.0385 | 0.0726 |
+
+The game is at (in fact marginally below) the supersampled ideal - mipmaps + 16x anisotropic
+filtering - and half of the unfiltered value: the markings move smoothly instead of crawling.
+They are also sharp: the marking atlas has 4,600 texels per metre against ~620 screen pixels
+per metre at the markings' median distance from the driver's eye (0.46 m, helmet-camera field
+of view; ~1,250 at the iPhone's 2x render scale), so they are never magnified.
+
+## Lap check (`tools/lap-check.mjs`)
+
+At 12 points round the lap, at racing speed (69-260 km/h), the T-cam, chase and cockpit views
+are captured and a contact sheet is written. Both mirrors, read from the driver's eye, show a
+live and varied image (luminance standard deviation 0.07-0.20, 11-16 distinct levels) that
+changes from point to point, in the sun and in the tunnel: 12 / 12.
+
+## Materials in sun, shade and the tunnel (`tools/material-check.mjs`)
+
+The street scenery casts no shadows in this build (only the car and the tunnel do), so "in
+shadow" means the car's faces turned away from the sun - lit by the sky and the street only -
+and the tunnel. ID renders split each frame into navy paint (navy areas of the livery only),
+exposed carbon, tyre rubber and the halo; the mean colours are compared as CIE Lab Delta-E
+(2.3 = just noticeable):
+
+| Light | paint / carbon | paint / rubber | paint / halo | carbon / rubber | carbon / halo | rubber / halo |
+|---|---|---|---|---|---|---|
+| Sun-lit side | 11.8 | 29.3 | 15.3 | 24.7 | 3.6 | 23.1 |
+| Shaded side | 11.1 | 14.5 | 10.3 | 14.5 | 9.0 | 9.4 |
+| Tunnel | 10.9 | 19.6 | 8.0 | 19.3 | 8.5 | 17.3 |
+
+(The first tunnel measurement failed - paint / halo 2.7, carbon / halo 1.8 - because the tunnel
+lit the car far less than its bright walls; the tunnel's reflection environment and lamp fill
+were corrected to light painted walls and ceiling with lamp rows.)
+
+## Performance
+
+**Frame rate on an iPhone was not measured.** This session ran in a cloud container with no GPU
+and no phone or computer attached, so the iPhone 18 Pro Max / Safari target could not be
+verified. The only renderer here is SwiftShader (a CPU rasteriser): the built-in benchmark runs
+at 0.6 FPS at 1912 x 880 there, which says nothing about a phone GPU. To measure on the device,
+open `https://loyoso34.github.io/Monaco-F1-Mobile/?bench=1&cam=cockpit` (and `cam=tcam`) in
+Safari: the result panel reports the device, the GPU, the render size, average FPS, 1 % low and
+frame-time percentiles.
+
+What was measured here (same container, `tools/perf-probe.mjs` and a per-pass breakdown at the
+start straight, High tier):
+
+| Per frame | Previous release (4bf8607) | Now |
 |---|---|---|
-| Draw calls per frame, main + shadow pass | 64–154 | 106–213 |
-| Mirror pass (one glass per frame, only while a mirror is on screen) | — | ~75 calls at the start straight in the T-cam; 0 in the cockpit view (glasses off-screen) |
-| Triangles per frame | 73 k – 158 k | 95 k – 201 k (car 44 k → 66 k: cockpit, wheel, gloves, ducts, mirrors; road rubber profile and overlays) |
-| Frame time under software GL (CPU rasteriser — relative only) | 211–276 ms | 305–411 ms |
-| Simulation + game logic per frame | 0.25 ms avg | 0.42 ms avg, ~0.9 ms peak (wheel-spin dynamics, cockpit display / LEDs, arm IK) |
-| Memory over 3 laps + crash + restart + 1 lap | flat | flat (JS heap 81 → 81 MB, debris cleared) |
+| Draw calls, T-cam (main + shadow + one mirror) | 296 | 301 (main 167, shadow 57, mirror 78) |
+| Draw calls, cockpit | 229 (mirrors off-screen) | 364 (main 219, shadow 60, mirror 85): the wider helmet-camera view now shows both mirrors, so a mirror renders every frame, and more of the street is in view |
+| Car | 133 meshes, 66 k triangles | 124 meshes, 84 k triangles (new halo, tyre profile; decals now one atlas, merged per part) |
+| Triangles, T-cam | 302 k | 347 k |
+| Simulation + game logic | 0.42 ms avg | unchanged (no physics changes) |
+| Memory over 3 laps + crash + restart | flat | flat |
 
-What keeps the cost down:
-
-* **Draw calls:** the steering wheel's static parts and each glove are merged per material
-  (car meshes 182 → 133, car draw calls in the main pass 118 → 78 in the cockpit view); the
-  car body is merged per material inside each detachable part as before; road overlays are one
-  mesh per ~600 m; kerbs / lines one mesh per 150 m chunk.
-* **Mirrors:** 256 × 88 half-float targets (192 × 66 Medium, 128 × 44 Low), the two glasses
-  alternate frames (each refreshes at half the frame rate; every fourth frame on Low), a glass that is off-screen or seen edge-on is skipped, and the mirror pass never
-  re-renders the shadow map.
-* **Textures:** asphalt 1,024² (map, normal, roughness) on High / Medium, 512² on Low; one
-  1,024² atlas for every road mark; decals sized to their real area (2,200–4,000 px/m); the
-  wheel display (512 × 288) is redrawn at ≤ 15 Hz and only when a shown value changes.
-* **Adaptive quality** (Graphics = Auto) scales the render resolution down in steps when the
-  60th-percentile frame time exceeds 18.2 ms, then drops to the Medium / Low tier (smaller
-  shadow map and mirror targets, then no shadows). Choosing Graphics = Low before driving also
-  builds the circuit with 512² asphalt without normal / roughness maps and without catch fences. The DOM HUD
-  is unaffected by render scaling and stays sharp.
-
-The software renderer here shades every pixel on the CPU, so the PBR road (normal + roughness
-maps over half the screen) and the extra geometry weigh far more than on a phone GPU. On the
-A-series GPU the budget that matters is CPU-side draw-call submission (~280 per frame in the
-T-cam, all passes) and fill rate at 2× resolution — both well within an iPhone Pro's range, but
-**not measured on the device** (see below).
+Cost control: one decal atlas merged per car part (car transparent meshes 34 -> 13), the
+driver / wheel / arms skipped by the mirror cameras (render layer 1), the mirror far plane at
+320 m, the two glasses on alternate frames, no shadow-map update in the mirror pass, the wheel
+display redrawn only on change, and adaptive resolution (Graphics = Auto) that lowers the render
+scale and then the tier (smaller mirrors and shadow map) when the 60th-percentile frame time
+exceeds 18.2 ms. The environment maps are half-float (linear filtering is core in WebGL 2 for
+half float; 32-bit float filtering is not available on every phone), and the mirror targets
+fall back to 8-bit sRGB where the GPU cannot render to half float.
 
 ## Still needs a physical-phone test
 
-* **Sustained 60 FPS on the iPhone 18 Pro Max** — not measurable here (software GPU). Check with
-  Settings → Show FPS while driving several laps round the harbour, through the tunnel (the
-  highest triangle count), in the T-cam (mirror passes) and during a crash.
+* **Sustained 60 FPS on the iPhone 18 Pro Max** — not measured (no device, no GPU here). Run
+  `?bench=1&cam=cockpit` and `?bench=1&cam=tcam` in Safari (twice: the first run warms the
+  shader cache), and check Settings → Show FPS through the tunnel and during a crash. If the
+  1 % low falls under ~55 FPS, Graphics = Medium halves the shadow map and shrinks the mirrors.
 * **Half-float render targets on iOS Safari** for the mirrors (WebGL 2 with
   `EXT_color_buffer_float` / `_half_float`); without them the mirrors fall back to 8-bit sRGB
   targets automatically.

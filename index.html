@@ -114,6 +114,9 @@ button { font: inherit; color: inherit; border: 0; background: none; cursor: poi
 #msg .m.good { background: rgba(18,120,60,0.88); }
 #msg .m.best { background: linear-gradient(90deg, #7c3aed, #a855f7); }
 #dash { position: absolute; left: 50%; transform: translateX(-50%); bottom: calc(var(--sa-b) + 12px); display: flex; align-items: center; gap: 12px; background: var(--glass); border-radius: 14px; padding: 6px 14px 6px 12px; }
+/* cockpit camera: the steering wheel's own display shows gear and speed, so the HUD panel moves
+   up out of the way (top centre, smaller) instead of covering the wheel */
+#hud.cockpitView #dash { bottom: auto; top: calc(var(--sa-t) + 10px); transform: translateX(-50%) scale(0.78); transform-origin: 50% 0; }
 #gear { font-size: 40px; font-weight: 900; width: 34px; text-align: center; line-height: 1; }
 #speed { font-size: 30px; font-weight: 800; font-variant-numeric: tabular-nums; min-width: 66px; text-align: right; line-height: 1; }
 #speedU { font-size: 11px; color: var(--muted); font-weight: 700; letter-spacing: 0.1em; }

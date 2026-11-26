@@ -41,7 +41,7 @@ export const SPEC = {
   cockpitOpeningRearFA: 1.840,   // [M] headrest rear edge
   cockpitWidth: 0.520,           // [E] opening width at the shoulders
   helmetCentreFA: 1.560,         // [M]
-  helmetTopHeight: 0.790,        // [M]
+  helmetTopHeight: 0.852,        // [M] 2024 side photos: helmet top level with the halo arm
   haloApexFA: 0.940,             // [M] front pillar top joins the hoop
   haloTopHeight: 0.805,          // [M] top of the hoop at the apex
   haloRearFA: 1.700,             // [M] rear mounts
@@ -51,7 +51,7 @@ export const SPEC = {
   airboxTopHeight: 0.950,        // [R] 950 mm max height / [M]
   tcamFA: 1.885,                 // [M] T-camera lens position behind the front axle
   tcamHeight: 0.985,             // [M] lens height above ground
-  sidepodInletFA: 1.450,         // [M]
+  sidepodInletFA: 1.000,         // [M] 2024 side photo (Austria): letterbox inlet under the overbite, just behind the mirrors
   rearWingTopHeight: 0.950,      // [R]/[M] high-downforce wing at the height limit
   rearWingSpan: 1.020,           // [E]
   beamWingHeight: 0.360,         // [E]
@@ -84,7 +84,11 @@ export const CAMERA_MOUNTS = {
   tcam: { x: 0, y: SPEC.tcamHeight, z: Z.fromFA(SPEC.tcamFA), pitchDeg: -6.5, vfov16x9: 54 },
   // driver's eye at the visor: the steering wheel's LEDs, display and the gloves sit in the
   // lower part of the frame, the halo pillar in the middle, as in helmet-camera footage
-  cockpit: { x: 0, y: 0.700, z: Z.fromFA(1.47), pitchDeg: -7.5, vfov16x9: 56 },
+  // eye 0.756 m: 0.096 m under the helmet top, which the 2024 side photos put level with the
+  // halo arm; the halo crossbar then sits just above the eye line. Field of view of a helmet
+  // camera (~112 deg across a 16:9 frame): halo bar across the top, pillar in the middle, both
+  // front tyres beside the nose, the wheel at the bottom and both mirrors at the frame edges
+  cockpit: { x: 0, y: 0.756, z: Z.fromFA(1.47), pitchDeg: -10.5, vfov16x9: 80 },
 };
 
 // Collision geometry: circles in the ground plane (x, z, radius) at the car's real

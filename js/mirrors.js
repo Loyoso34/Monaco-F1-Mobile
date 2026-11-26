@@ -9,11 +9,16 @@
 // shadow-map updates, and skipped when the glass is off-screen or seen from behind.
 import * as THREE from 'three';
 
+// render-target sizes match the 4:1 glass (200 x 50 mm)
 const QUALITY = {
-  high: { w: 256, h: 88, every: 1 },
-  medium: { w: 192, h: 66, every: 1 },
-  low: { w: 128, h: 44, every: 2 },
+  high: { w: 384, h: 96, every: 1 },
+  medium: { w: 256, h: 64, every: 1 },
+  low: { w: 160, h: 40, every: 2 },
 };
+// F1 mirror glass is slightly convex: the field of view is widened about the glass centre
+// (horizontal x vertical), so the glass shows the track behind and the car's own flank only
+// along its inboard edge
+const CONVEX = [1.55, 1.30];
 
 export class Mirrors {
   constructor(renderer, scene, carRoot, tier = 'high') {
@@ -30,10 +35,11 @@ export class Mirrors {
         minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter, generateMipmaps: false, depthBuffer: true,
       });
       rt.texture.name = 'mirrorRT';
-      // the glass shows the reflection, tinted by the ~85 % reflectance of mirror glass
-      m.glass.material = new THREE.MeshBasicMaterial({ map: rt.texture, color: 0xd9dee6 });
+      // the glass shows the reflection at the ~80 % reflectance of silvered glass (neutral)
+      m.glass.material = new THREE.MeshBasicMaterial({ map: rt.texture, color: 0xcdcdcd });
       const cam = new THREE.PerspectiveCamera();
       cam.matrixAutoUpdate = false; cam.matrixWorldAutoUpdate = false;
+      cam.layers.set(0);                                        // cockpit-only objects (layer 1) are skipped
       return { ...m, rt, cam, q, valid: false };
     });
     this.tier = tier;
@@ -87,8 +93,9 @@ export class Mirrors {
       const vn = T.n.clone().multiplyScalar(-1);              // camera +z (towards the eye)
       const d = -T.va.dot(vn);                                  // eye -> glass plane distance
       if (d < 1e-4) continue;
-      const near = d, far = 700;
-      const l = T.r.dot(T.va), rr = T.r.dot(T.vb), b = T.u.dot(T.va), t = T.u.dot(T.vc);
+      const near = d, far = 320;                              // beyond ~300 m the scene is sub-pixel in the glass
+      let l = T.r.dot(T.va), rr = T.r.dot(T.vb), b = T.u.dot(T.va), t = T.u.dot(T.vc);
+      { const cx = (l + rr) / 2, cy = (b + t) / 2; l = cx + (l - cx) * CONVEX[0]; rr = cx + (rr - cx) * CONVEX[0]; b = cy + (b - cy) * CONVEX[1]; t = cy + (t - cy) * CONVEX[1]; }
       const cam = m.cam;
       cam.projectionMatrix.makePerspective(l, rr, t, b, near, far);
       cam.projectionMatrixInverse.copy(cam.projectionMatrix).invert();

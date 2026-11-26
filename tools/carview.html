@@ -13,6 +13,7 @@
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/addons/RoomEnvironment.js';
 import { createCar } from '../js/carmodel.js';
+import { outdoorEnv, tunnelEnv } from '../js/envmap.js';
 import { SPEC, Z, CAMERA_MOUNTS, buildCollisionPoints } from '../js/carspec.js';
 const P = new URLSearchParams(location.search);
 const view = P.get('view') || 'side';
@@ -24,11 +25,23 @@ renderer.shadowMap.enabled = true;
 document.body.appendChild(renderer.domElement);
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0xcfd6de);
-const pm = new THREE.PMREMGenerator(renderer);
-scene.environment = pm.fromScene(new RoomEnvironment(), 0.04).texture;
-scene.add(new THREE.HemisphereLight(0xdde8ff, 0x445566, 0.6));
-const sun = new THREE.DirectionalLight(0xfff2e0, 2.2);
-sun.position.set(4, 8, -3); sun.castShadow = true;
+// lighting as in the game (env=outdoor, default) or the tunnel (env=tunnel); env=room: studio
+const envMode = P.get('env') || 'outdoor';
+const sunDirV = new THREE.Vector3(4, 8, -3).normalize();
+if (envMode === 'room') {
+  const pm = new THREE.PMREMGenerator(renderer);
+  scene.environment = pm.fromScene(new RoomEnvironment(), 0.04).texture;
+  scene.add(new THREE.HemisphereLight(0xdde8ff, 0x445566, 0.6));
+} else if (envMode === 'tunnel') {
+  scene.environment = tunnelEnv(renderer); scene.environmentIntensity = 0.75 * 0.6;
+  scene.add(new THREE.HemisphereLight(0xffe2bd, 0x3a3733, 0.85 * 0.70));
+  scene.background = new THREE.Color(0x2a2724);
+} else {
+  scene.environment = outdoorEnv(renderer, sunDirV); scene.environmentIntensity = 0.75;
+  scene.add(new THREE.HemisphereLight(0xcfe2ff, 0x6b6356, 0.85));
+}
+const sun = new THREE.DirectionalLight(0xfff1dc, envMode === 'tunnel' ? 2.7 * 0.03 : 2.7);
+sun.position.copy(sunDirV).multiplyScalar(10); sun.castShadow = true;
 sun.shadow.mapSize.set(2048, 2048); Object.assign(sun.shadow.camera, { left: -4, right: 4, top: 4, bottom: -4 });
 scene.add(sun);
 const car = createCar({ quality: 'high' });
@@ -63,6 +76,17 @@ else if (view === 'haloside') { cam = new THREE.PerspectiveCamera(24, W / H, 0.0
 else if (view === 'halorear') { cam = new THREE.PerspectiveCamera(30, W / H, 0.05, 100); cam.position.set(1.1, 1.55, Z.FA + 2.9); cam.lookAt(0, 0.74, Z.FA + 1.2); }
 else if (view === 'halofront') { cam = new THREE.PerspectiveCamera(16, W / H, 0.05, 100); cam.position.set(0.35, 1.05, Z.FA + 0.05); cam.lookAt(0, 0.74, Z.FA + 0.95); }
 else if (view === 'pillarback') { cam = new THREE.PerspectiveCamera(14, W / H, 0.02, 100); cam.position.set(0.05, 0.70, Z.FA + 1.55); cam.lookAt(0, 0.76, Z.FA + 0.94); }
+else if (view === 'persp') {
+  // generic telephoto view to match reference photos: az 0 = from the car's left (-x),
+  // 90 = from the front (-z), 180 = from the right; el = elevation; w = frame width at the target
+  const az = +(P.get('az') || 0) * Math.PI / 180, el = +(P.get('el') || 10) * Math.PI / 180, D = +(P.get('D') || 60), w = +(P.get('w') || 6.2);
+  const tx = +(P.get('tx') || 0), ty = +(P.get('ty') || 0.45), tz = +(P.get('tz') || cz);
+  const fov = 2 * Math.atan((w / 2) * (H / W) / D) * 180 / Math.PI;
+  cam = new THREE.PerspectiveCamera(fov, W / H, 0.5, 500);
+  cam.position.set(tx - D * Math.cos(el) * Math.cos(az), ty + D * Math.sin(el), tz - D * Math.cos(el) * Math.sin(az));
+  cam.lookAt(tx, ty, tz);
+  window.__proj = (x, y, z) => { const v = new THREE.Vector3(x, y, z).project(cam); return [(v.x + 1) / 2 * W, (1 - v.y) / 2 * H]; };
+}
 else if (view === 'wheelfront' || view === 'wheelside' || view === 'wheeltop') {
   // close-ups of the steering wheel and gloves (camera placed in the wheel's own frame)
   const drv = car.root.getObjectByName('driver'); if (drv) drv.visible = false;
@@ -86,8 +110,24 @@ else if (view === 'tcam' || view === 'cockpit') {
   for (let k = 1; k < 40; k++) { const s = new THREE.Mesh(new THREE.PlaneGeometry(0.15, 2), new THREE.MeshBasicMaterial({ color: 0xffffff })); s.rotation.x = -Math.PI / 2; s.position.set(0, 0.003, -k * 6); scene.add(s); }
   ground.scale.set(30, 30, 1);
 }
+cam.layers.enable(1);
 document.getElementById('lbl').textContent = `RB20 – ${view}` + (steer ? `  steer ${P.get('steer')}°` : '');
 renderer.render(scene, cam);
+window.__car = car; window.__scene = scene; window.__THREE = THREE; window.__Z = Z;
+// body surface height probe: [[x, FA], ...] -> highest hit (excluding the halo / driver / wheel)
+window.__probe = (pts, skip = ['halo', 'driver', 'steeringWheel', 'driverArms']) => {
+  const rc = new THREE.Raycaster(); const meshes = [];
+  car.root.updateMatrixWorld(true);
+  car.root.traverse((o) => { if (!o.isMesh || !o.visible) return; let p = o; while (p) { if (skip.includes(p.name)) return; p = p.parent; } if (o.material && o.material.transparent) return; meshes.push(o); });
+  return pts.map(([x, fa]) => { rc.set(new THREE.Vector3(x, 3, Z.FA + fa), new THREE.Vector3(0, -1, 0)); const h = rc.intersectObjects(meshes, false)[0]; return h ? [x, fa, +h.point.y.toFixed(3), h.object.name] : [x, fa, null, '']; });
+};
+// side profile probe: [[FA, y], ...] -> outermost surface x on the right side (ray from +x)
+window.__probeSide = (pts, skip = ['halo', 'driver', 'steeringWheel', 'driverArms', 'mirrorL', 'mirrorR']) => {
+  const rc = new THREE.Raycaster(); const meshes = [];
+  car.root.updateMatrixWorld(true);
+  car.root.traverse((o) => { if (!o.isMesh || !o.visible) return; let p = o; while (p) { if (skip.includes(p.name)) return; p = p.parent; } if (o.material && o.material.transparent) return; meshes.push(o); });
+  return pts.map(([fa, y]) => { rc.set(new THREE.Vector3(3, y, Z.FA + fa), new THREE.Vector3(-1, 0, 0)); const h = rc.intersectObjects(meshes, false).filter(h => !/corner|tyre|wheel|spin|hub/.test(h.object.parent ? h.object.parent.name : ''))[0]; return h ? [fa, y, +h.point.x.toFixed(3), h.object.name] : [fa, y, null, '']; });
+};
 window.__ready = true;
 </script>
 </body>
