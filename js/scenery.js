@@ -794,7 +794,7 @@ export function buildScenery(T, { quality = 'high', renderer = null, corridor = 
   }
 
   return {
-    root, sky, water, sunDir, nBuildings, terrainH, waterNormal, rej, corridor: C, terrainLimit: TL, terrainStep: TERRAIN_STEP,
+    root, sky, water, sunDir, nBuildings, terrainH, groundAt, groundMax: Math.max(...TG.h), waterNormal, rej, corridor: C, terrainLimit: TL, terrainStep: TERRAIN_STEP,
     footprints: occupied, buildings: BLD.concat(BLD_LANDMARK),
   };
 }

@@ -7,20 +7,26 @@
 // shadow, only the car's sunlight fades (lighting.js CAR_SUN), the sun-lit facades stay lit.
 import * as THREE from 'three';
 
-export function buildShade(T, buildings, groundAt, sunDir, { cell = 32 } = {}) {
+// groundAt must be cheap (the scenery's pre-sampled terrain grid); maxGround = its highest point
+export function buildShade(T, buildings, groundAt, sunDir, { cell = 32, maxGround = 250 } = {}) {
   // building prisms (oriented boxes, bottom / top heights)
   const P = buildings.map((b) => {
     const ca = Math.cos(b.ang), sa = Math.sin(b.ang);
     return { cx: b.cx, cz: b.cz, ux: sa, uz: ca, vx: ca, vz: -sa, hw: b.w / 2 + 0.3, hd: b.dpt / 2 + 0.3, y0: b.baseY, y1: b.baseY + b.h + 1.0, r: Math.hypot(b.w, b.dpt) / 2 + 0.5 };
   });
+  // spatial hash with numeric keys (string keys dominated the cost)
   const grid = new Map();
+  const KEY = (gx, gz) => (gx + 2048) * 4096 + (gz + 2048);
+  let maxTop = 0;
   for (let i = 0; i < P.length; i++) {
     const p = P[i];
+    maxTop = Math.max(maxTop, p.y1);
     for (let gx = Math.floor((p.cx - p.r) / cell); gx <= Math.floor((p.cx + p.r) / cell); gx++)
       for (let gz = Math.floor((p.cz - p.r) / cell); gz <= Math.floor((p.cz + p.r) / cell); gz++) {
-        const k = gx + ',' + gz; if (!grid.has(k)) grid.set(k, []); grid.get(k).push(i);
+        const k = KEY(gx, gz); let l = grid.get(k); if (!l) { l = []; grid.set(k, l); } l.push(i);
       }
   }
+  const ceiling = Math.max(maxTop, maxGround) + 1;
   const sd = sunDir.clone().normalize();
   const inside = (p, x, y, z) => {
     if (y < p.y0 || y > p.y1) return false;
@@ -29,12 +35,13 @@ export function buildShade(T, buildings, groundAt, sunDir, { cell = 32 } = {}) {
   };
   // 0 = sun-lit, 1 = in shade
   const shadeAt = (x, y, z) => {
-    for (let t = 1.0; t < 230; t += t < 40 ? 1.2 : 2.5) {
+    let n = 0;
+    for (let t = 1.0; t < 330; t += t < 40 ? 1.2 : 2.5, n++) {
       const px = x + sd.x * t, py = y + sd.y * t, pz = z + sd.z * t;
-      const list = grid.get(Math.floor(px / cell) + ',' + Math.floor(pz / cell));
-      if (list) for (const i of list) if (inside(P[i], px, py, pz)) return 1;
-      if (t > 6 && groundAt(px, pz) > py + 0.5) return 1;      // hillside / the Rock
-      if (py > 260) break;
+      if (py > ceiling) break;                                    // above every roof and hilltop
+      const list = grid.get(KEY(Math.floor(px / cell), Math.floor(pz / cell)));
+      if (list) for (let j = 0; j < list.length; j++) if (inside(P[list[j]], px, py, pz)) return 1;
+      if (t > 6 && (n & 1) === 0 && groundAt(px, pz) > py + 0.5) return 1;      // hillside / the Rock
     }
     return 0;
   };

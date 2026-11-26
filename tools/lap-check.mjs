@@ -70,8 +70,8 @@ const sheet = await page.evaluate(async (shots) => {
     const y = i * (ch + 4);
     const [ck, tc, cs] = await Promise.all([load(shots[i].data.cockpit), load(shots[i].data.tcam), load(shots[i].data.chase)]);
     c.drawImage(ck, 160, 60, 636, 240, 0, y, cw, ch);               // halo cross-bar + pillar
-    c.drawImage(ck, 40, 190, 220, 110, cw + 4, y, 156, ch * 0.75);  // left mirror (driver's eye)
-    c.drawImage(ck, 696, 190, 220, 110, cw + 164, y, 156, ch * 0.75); // right mirror
+    c.drawImage(ck, 50, 178, 200, 100, cw + 4, y, 156, ch * 0.75);  // left mirror (driver's eye)
+    c.drawImage(ck, 706, 178, 200, 100, cw + 164, y, 156, ch * 0.75); // right mirror
     c.drawImage(cs, 200, 120, 556, 260, cw * 2 + 8, y, cw, ch);     // chase: the car
     c.drawImage(tc, 230, 230, 496, 210, cw * 3 + 12, y, 200, ch * 0.85); // T-cam
     c.fillStyle = '#ffd400'; c.font = '11px sans-serif'; c.fillText(`${shots[i].s} m  ${shots[i].kmh} km/h  daylight ${shots[i].daylight}`, 4, y + 12);

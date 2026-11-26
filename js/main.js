@@ -117,7 +117,7 @@ async function setup(M) {
   // shade table along the lap for the car's own sunlight
   setProgress(0.78, 'Building Monaco…'); await nextFrame();
   const shadeT0 = performance.now();
-  const shade = M.shade.buildShade(track, sc.buildings, (x, z) => sc.terrainH(x, z) - 0.25, sc.sunDir);
+  const shade = M.shade.buildShade(track, sc.buildings, sc.groundAt, sc.sunDir, { maxGround: sc.groundMax });
   {
     const shadeMeshes = [];
     tm.group.traverse((o) => { if (o.isMesh && ['ground', 'roadPaint', 'barriers', 'fence', 'roadDetail'].includes(o.name)) shadeMeshes.push(o); });

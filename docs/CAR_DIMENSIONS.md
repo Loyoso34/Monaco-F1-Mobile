@@ -44,10 +44,12 @@ were found; those values are photo measurements or estimates and are marked as s
 | Ride height front / rear (static, Monaco) | 0.030 / 0.060 | E | |
 | Cockpit opening, front / rear edge behind the front axle | 1.050 / 1.840 | M | |
 | Cockpit opening width | 0.52 | E | |
-| Helmet centre behind the front axle | 1.560 | M | Helmet top 0.852 above ground (level with the halo arm in the 2024 side photo); driver's eye 0.756 |
-| Halo apex (front pillar top) behind the front axle | 0.940 | M | Top of hoop 0.805 above ground |
-| Halo rear mounts behind the front axle / half width | 1.700 / 0.395 | M / E | |
-| Halo tube | Ø 0.049 + aero fairing | E | Faired hoop: rounded D section ~74 × 56 mm over the front, ~90 × 66 mm on the legs (see below) |
+| Helmet centre behind the front axle | 1.560 | M | Helmet top 0.826 above ground (level with the top of the halo arm beside it, ~4 cm under the hoop's front top; camera-matched 2024 side reference); driver's eye 0.728 |
+| Halo hoop front (centre line) behind the front axle | 0.968 | M | Top surface 0.865 above ground; centre line falls ~9 cm to the feet |
+| Halo feet behind the front axle / half width | 1.775 / 0.300 | M / E | Legs run into the cockpit shoulders; widest 0.392 beside the helmet |
+| Halo fairing section | 60 × 47 mm rails | M | 63 × 50 front corners, 69 × 54 legs, short fillet (to ~100 × 73) into the shoulders; photo rails project 40–49 px at 833 px/m |
+| Cockpit shoulders (top) | 0.740–0.760 | M | 1.60–1.78 m behind the axle; rounded ridge continuing past the airbox (to 0.66 at 2.55 m) |
+| Chassis side top ahead of the cockpit | 0.612 / 0.638 | M | At 0.6 / 0.9 m behind the axle; near-vertical sides (BYBIT face) |
 | Airbox inlet (roll hoop front) behind the front axle | 1.790 | M | |
 | Airbox / roll-hoop top | 0.950 | R / M | Height limit 950 mm, matches the photos |
 | **T-cam lens** behind the front axle / height | **1.885 / 0.985** | M | Default camera position |
@@ -85,6 +87,30 @@ Reference photographs (Wikimedia Commons, used only for measurement, not shipped
 `Red_Bull_RB20_No.1_B32dce58209dcfc99e9b27d1d47a568.jpg`,
 `RB20_During_the_2024_Japanese_Free_Practice.jpg`,
 `2024_Spanish_Grand_Prix_(53810018852).jpg`.
+
+## Camera-matched side reference (2026 upgrade)
+
+The comparison image supplied with the upgrade (real 2024 RB20, left side, cropped with cyan
+station lines 0.5 / 1.0 / 1.5 m behind the front axle) was reproduced with
+`tools/refmatch.mjs`: the model rendered with a telephoto camera whose stations land on the
+same pixels (833 px/m on the 1320 × 964 crop). The model half of the supplied image fits a
+camera elevation of 9.5–10°; the photograph does not: the separation of the near and far halo
+rails (≈ 64 mm at 1.25 m behind the axle) gives **7°**. The vertical registration (target
+height 0.40 m at the frame centre) is bounded by the airbox top just above the crop (≤ 0.40)
+and the floor edge (≥ 0.40). Read at that camera, the photo put the cockpit shoulders ~9 cm
+higher than the model, the hoop front ~3 cm higher, the helmet ~3 cm lower, the halo legs
+landing on the shoulders instead of plunging to 0.58 m, and the rail section at ~60 × 47 mm
+(the model had 74 × 56 growing to 136 × 96 at the feet). Decal stations and sizes were read
+the same way: ORACLE from 1.27 m with a 0.15 m cap height, BYBIT 0.49–0.79 m (0.08 m letters,
+the red line through their lower half), ROKT 1.57–1.78 m on the wall under the shoulder,
+RAUCH 0.33 × 0.126 m centred 0.73 m on the floor body's leading wall.
+
+![Reference photo, before and after with the same camera](img/ba-reference-side.webp)
+
+**Paint.** On the same panel and in the same light the photo's navy is ~1/170 of the white
+ORACLE lettering in linear light (the white close to clipping); the paint was set to about
+twice that (`#131b37`), a very dark blue whose navy reads mostly through the sky sheen of its
+clear coat.
 
 ## Validation views
 

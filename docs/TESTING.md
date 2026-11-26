@@ -1,6 +1,74 @@
 # Testing report
 
-## What was tested, and how
+## 2026 upgrade: what was tested, and how
+
+Same environment as below: a cloud container **without a phone and without a GPU** - Chromium
+(Playwright) with iPhone emulation (iPhone 15 Pro Max user agent, 956 × 440 landscape, touch)
+and software WebGL (SwiftShader). **No iPhone, no Safari / WebKit, no GPU**: frame rates here
+say nothing about the phone (see *Still needs a physical-phone test*).
+
+| Test | Result |
+|---|---|
+| Acceptance checks (`tools/gameplay-test.mjs out iphone`) | **43 / 43** pass (steering direction, wheel ratio, pedals, timing, damage, mirrors, no page errors) |
+| Circuit inspection (`tools/inspect-circuit.mjs`) | **all checks pass on High, Medium and Low**: 0 scenery points in the drivable volume (new balconies, awnings, retaining walls included), 0 buildings on pavements, 0 overlapping footprints of 608, 0 floating bases of 552, terrain under the circuit everywhere; self-test still catches planted faults |
+| Braking / traction (`tools/handling-test.mjs`) | **9 / 9** (Standard), **8 / 8** (assists off) |
+| Zero steering / straight line (`tools/straight-line-test.mjs`) | all pass: heading change 0.00000°, drift 0.0000 m |
+| Lap check at racing speed (`tools/lap-check.mjs`) | **12 / 12**: both mirrors live and varied at 62-271 km/h, in sun, shade and the tunnel |
+| Physics laps (`tools/sim-lap.mjs 2`) | 80.929 s (out-lap) and 79.687 s, 0 contacts (79.683 s before) |
+| Halo markings shimmer (`tools/decal-shimmer-test.mjs`) | **4 / 4**: residual under sub-pixel motion at or below the 16x supersampled ideal (sun / shade / tunnel, cockpit and T-cam) |
+| Physics audit (`tools/physics-audit.mjs`) | before / after below |
+
+### Before / after (same cameras, same positions)
+
+* Side profile matched to the 2024 reference photo (camera fitted to the photo, not to the
+  model): [img/ba-reference-side.webp](img/ba-reference-side.webp)
+* Front and rear three-quarter, cockpit and T-cam model views: [img/ba-car.webp](img/ba-car.webp)
+* Eight Monaco corners from the T-cam (start straight, Sainte Dévote, Casino Square, the
+  hairpin, the tunnel exit, Tabac, Swimming Pool, La Rascasse): [img/ba-monaco.webp](img/ba-monaco.webp)
+
+![Reference photo, before, after](img/ba-reference-side.webp)
+
+### Physics audit: why the car slid, and the result
+
+`tools/physics-audit.mjs` drives fixed manoeuvres on a flat pad and on the circuit. Steady
+state, the car was (and is) understeer-biased: the rear tyres never pass ~58 % of their peak
+slip angle. The sliding came from the input side and from missing physics:
+
+| Symptom | Cause found | Before | After |
+|---|---|---|---|
+| Fronts scrub / the car slides wide | the speed-dependent steering range put ~35 % of the thumb travel beyond the front tyres' peak at every speed | fronts past peak from 60-70 % input (100-250 km/h) | grip-based range: fronts pass the peak only in the last ~10 % of travel, at every speed |
+| Stops end in a front slide | a full-pedal thumb press locked the fronts for most of a stop | 200 -> 80 km/h: fronts locked 1.04 s of 1.25 s | 0.10 s (Standard brake-lock aid; Off is unchanged) |
+| Hard to catch a slide | tyre force fell to 76 % of peak when fully sliding | 76 % | 83 % (progressive breakaway, same peak grip) |
+| Power exits on/off | the throttle pad was full over its top 70 % | on / off | top third full, progressive below (25 % at the bottom edge) |
+| Kerbs and bumps not felt | no vertical dynamics: a kerb only changed the friction by 6 % | load swing 0 | unsprung corners: kerb strike swings the tyre load -3.9 / +2.5 kN |
+| Handling varied with frame rate | per-frame step inputs through a frame-rate-dependent filter | continuous thumb motion, 30 vs 240 fps: 0.19 m / 0.05° after 4 s | 0.08 m / 0.01° (exact exponential filter, inputs ramped across each frame's sub-steps) |
+
+Unchanged and still good: Swimming-Pool slaloms at 140-200 km/h (body slip ≤ 3°, settles in
+< 0.1 s), lift-off and trail braking mid-corner (body slip change ≤ 2.6°, no spin), full lock
+at hairpin speeds (path radius 6.0 m at 45 km/h against the hairpin's 9.8 m centre line),
+0-100 km/h 2.2 s with zero drift. With assists off, flooring the throttle in 1st / 2nd while
+steering still spins the car - as it would.
+
+### Performance (measured here, all render passes per frame)
+
+Totals over every pass (main view, sun shadow, mirror, car reflection cube, PMREM filter), T-cam,
+High tier, at ten points round the lap:
+
+| | Before | After |
+|---|---|---|
+| Draw calls per frame | 253-369 (avg 310) | 285-404 (avg 345) |
+| Triangles per frame | 314-426 k (avg 368 k) | 442-600 k (avg 524 k) |
+| Building-shade bake at load | - | 0.26 s (once; first version took 31 s - the exact terrain function per ray step - fixed by sampling the drawn terrain grid) |
+
+Cost control added for the new work: building detail (balconies, awnings, cornices,
+parapets, plant) is a separate mesh per 150 m tile on its own render layer, drawn only in the
+main view and only within 280 m; the mirrors (to 200 m) and the reflection cube (to 240 m,
+one face per frame, building walls and roofs only) skip it; one facade material for the whole
+city; the building shade is baked once at load. The adaptive quality still lowers the render
+scale, then the tier (Medium: 64 px reflection cube, smaller mirrors and shadow map; Low:
+static sky reflections).
+
+## Earlier work: what was tested, and how
 
 All testing so far ran in a cloud container **without a physical phone and without a GPU**:
 Chromium (Playwright) with mobile emulation and software WebGL (SwiftShader). There is no WebKit
@@ -286,6 +354,12 @@ fall back to 8-bit sRGB where the GPU cannot render to half float.
 
 ## Still needs a physical-phone test
 
+* **2026 upgrade on a real iPhone (Safari / Home Screen app)**: the frame rate with the
+  architectural city and the live car reflections (`?bench=1&cam=tcam` and `&cam=cockpit`,
+  twice); the shader hooks (custom tone mapping, car-only sunlight, hemisphere share) compile
+  under WebKit's ANGLE / Metal; the half-float reflection cube; the load time added by the
+  shade bake; heat over a long session. If the 1 % low falls under ~55 FPS, Graphics = Medium
+  halves the reflection cube and the shadow map.
 * **Sustained 60 FPS on the iPhone 18 Pro Max** — not measured (no device, no GPU here). Run
   `?bench=1&cam=cockpit` and `?bench=1&cam=tcam` in Safari (twice: the first run warms the
   shader cache), and check Settings → Show FPS through the tunnel and during a crash. If the
