@@ -102,22 +102,61 @@ mesh, the scenery and the automated inspection all use this one corridor.
 
 ![Braking zone before the Nouvelle Chicane: braking streaks, lock-up marks, rubbered line](img/road-braking-zone.webp)
 
+## Barriers, fences and grandstands (`js/textures.js`, `js/trackmesh.js`, `js/scenery.js`)
+
+Everything is built to the scale a driver judges distance by, and textured at that scale:
+
+* **Armco**: three stacked galvanised W-beams (0.31 m each, 0.10–1.03 m above the road) as
+  relief geometry - each rail has a sky-lit upper face and a shaded lower face, so the barrier
+  shades correctly as it turns against the sun - on a 4 m texture tile (1,024 px: ~4 mm / px
+  along) carrying the W valley, lips, splice bolts every 4 m, post bolts every 2 m, spangle,
+  road grime at the foot and black tyre rubbing on the lower rails. Posts every 2 m show in the
+  gap under the bottom rail.
+* **Banners** stretched over the rails (4 m panels, artwork drawn at its real proportions) in
+  three sets of generic sponsor names that change every 96 m; **Tecpro** blocks 1 m wide.
+* **Catch fences**: 50 mm galvanised chain link of ~4 mm wire, 0.8 m per 256 px tile. The texture
+  is raw RGBA - wire colour everywhere, alpha = wire coverage - so the GPU mipmaps average to the
+  true see-through density: up close the wires are drawn, at a distance the fence is a fine,
+  still veil (no alpha-test lattice shimmering in motion). Seen edge-on the coverage rises (a
+  real fence closes up), capped so it never turns into a solid sheet. Painted steel posts every
+  4 m, 12 cm behind the rail face; 2.75 m of upright mesh, then a 0.6 m top panel leaning 0.55 m
+  in over the track.
+* **Contact shadows**: the run-off darkens over the last 0.75 m into the foot of every barrier,
+  and the barrier faces darken towards the road (ambient occlusion) - baked into vertex colours,
+  so they cost nothing at run time. Building walls darken over their first 1.1 m into the
+  pavement; the car carries its own soft contact shadow (floor footprint and the four tyre
+  patches), so it stays grounded in building shade and in the tunnel.
+* **Grandstands** are kept empty: concrete terraces with a row of red moulded seats on every
+  tread (0.5 m pitch, 8 m texture repeat with an aisle and yellow step nosings), front railing,
+  white canopy.
+* **Facade depth** (`js/city.js`): a recess mask drawn alongside the facade atlas marks every
+  window, shopfront and arch. The facade shader carries the view ray to the opening's depth
+  (tangent frame from screen-space derivatives, no extra vertex data): where it lands inside
+  the opening the glass is drawn there, where it lands on wall it is the reveal, drawn in shade.
+  Windows sit ~0.24 m into the walls and their reveals move as the car passes.
+
 ## The tunnel
 
-* **Structure** (`js/trackmesh.js`): armco (1.05 m) with a 7 m sponsor board only every 124 m per
-  side, capped back to a light concrete wall 0.35 m behind it; the wall rises to a cable tray at
-  4.6 m and on to the ceiling. Pilasters every 7.5 m carry 0.5 × 0.32 m transverse beams under a
-  **continuous slab ceiling** (5.9 m, 6.05 m at the crown) built as one connected surface that
-  faces the road. Two rows of LED luminaires at ±2.6 m (1.5 m fittings every 2.5 m, between the
-  beams) with a third, central row over the 70 m threshold zone after the entrance. A 0.6 m shell
-  and a roof slab (top 7.6 m) enclose it and cast the shadow that keeps the sun off the car;
-  concrete portal frames finish both ends.
-* **Lighting** is baked per vertex (unlit materials inside): near-uniform LED level, +35 % in the
-  threshold zone, lateral and height fall-off, daylight spilling in over 14 m at each portal.
-* **Transitions** (`js/main.js`): the daylight reaching the camera fades over the first ~18 m
-  inside each portal; sun, sky light and reflections follow it while a warm luminaire fill takes
-  over on the car. The exposure adapts with a lag like a broadcast camera — it opens up over
-  ~2 s entering, and the exit is briefly over-exposed before settling (figures in TESTING.md).
+* **Structure** (`js/trackmesh.js`): the same triple Armco as outside (relief geometry, with a 7 m
+  sponsor banner only every 124 m per side), capped back to a painted concrete wall 0.35 m
+  behind it (panel joints every 1.5 m, water stains from the cable tray, soot band above the
+  rail); the wall rises to a cable tray at 4.6 m and on to the ceiling. Pilasters every 7.5 m
+  carry 0.5 × 0.32 m transverse beams under a **continuous slab ceiling** (5.9 m, 6.05 m at the
+  crown) built as one connected surface that faces the road. Two rows of LED luminaires at
+  ±2.6 m (1.5 m fittings every 2.5 m, between the beams) with a third, central row over the 70 m
+  threshold zone after the entrance. A 0.6 m shell and a roof slab (top 7.6 m) enclose it and
+  cast the shadow that keeps the sun off the car; concrete portal frames finish both ends.
+* **Lighting** is baked per vertex (unlit materials inside) from a normalised luminaire level
+  (+35 % in the threshold zone, lateral and height fall-off, daylight spilling in over 18 m at
+  each portal), scaled per surface (`TUN` in `js/trackmesh.js`): a dim concrete tube - walls
+  mid-grey, the ceiling dark - with the luminaires glaring (soft additive halos in the ceiling
+  plane and across the tunnel) and their two rows picked up as soft sheen bands on the polished
+  road; the lines use the paint texture so they stay crisp.
+* **Exposure** (`js/main.js`): the camera opens up to ~1.75x under the roof, so the interior
+  reads while the exit is a blown-out opening; the daylight reaching the camera fades over the
+  first ~18 m inside each portal and sun, sky light and reflections follow it while a warm
+  luminaire fill takes over on the car. The exposure adapts with a lag like a broadcast camera -
+  it opens up over ~2 s entering, and the exit is briefly over-exposed before settling.
 * **The old black ceiling strip** came from the Fairmont hotel blocks: their undersides (6.0 m)
   cut through the apex of the arched ceiling (6.05 m), and with the sky light turned down in the
   tunnel those faces rendered almost black. The hotel no longer has any face inside the tunnel

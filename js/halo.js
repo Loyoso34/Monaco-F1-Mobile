@@ -50,8 +50,10 @@ function lens(t, chord, thick) {
 export function buildHalo({ q, apexFA, hi, envIntensity = 1 }) {
   const group = new THREE.Group(); group.name = 'halo';
   const mat = hi
-    ? new THREE.MeshPhysicalMaterial({ color: 0x101115, roughness: 0.46, metalness: 0.0, clearcoat: 0.55, clearcoatRoughness: 0.26, envMapIntensity: envIntensity })
-    : new THREE.MeshStandardMaterial({ color: 0x111216, roughness: 0.42, metalness: 0.0, envMapIntensity: envIntensity });
+    // satin black paint (albedo ~1.2 %) under a fuller clear coat than the body: in shade the
+    // halo keeps a soft sheen of sky and street that separates it from the matte tyre rubber
+    ? new THREE.MeshPhysicalMaterial({ color: 0x17181d, roughness: 0.46, metalness: 0.0, clearcoat: 0.72, clearcoatRoughness: 0.22, envMapIntensity: envIntensity })
+    : new THREE.MeshStandardMaterial({ color: 0x17181d, roughness: 0.40, metalness: 0.0, envMapIntensity: envIntensity });
   mat.name = 'haloSatin';
 
   // ---- hoop centreline (car frame; FA = distance behind the front axle) -----------------------

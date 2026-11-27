@@ -1,5 +1,5 @@
-// Renders the loading image and the corner thumbnails from the playable track and writes them
-// as lightweight WebP files to assets/.  node tools/capture.mjs
+// Renders the loading-screen key art (hero) - and on request the corner thumbnails - from the
+// playable track and writes them as lightweight WebP files to assets/.  node tools/capture.mjs [names]
 import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
 const { chromium } = require('playwright');
@@ -11,9 +11,9 @@ const tmp = fs.mkdtempSync('/tmp/mcshots-');
 const srv = spawn(process.execPath, [path.join(root, 'tools/serve.mjs'), '8769'], { stdio: 'ignore' });
 await new Promise(r => setTimeout(r, 400));
 const b = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
-const shots = (process.argv[2] || 'loading,corner-ste-devote,corner-casino,corner-hairpin,corner-tunnel,corner-pool').split(',');
+const shots = (process.argv[2] || 'hero').split(',');
 for (const name of shots) {
-  const big = name === 'loading';
+  const big = name === 'loading' || name === 'hero';
   const page = await b.newPage({ viewport: { width: big ? 1280 : 800, height: big ? 720 : 450 } });
   page.on('pageerror', e => console.log('err', e.message));
   await page.goto(`http://localhost:8769/?shot=${name}&noaudio=1&q=high`);

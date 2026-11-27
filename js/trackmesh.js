@@ -59,14 +59,38 @@ function barrierType(T, s, side) {
   return 'armco';
 }
 
+// Tunnel light (baked into vertex colours of unlit materials). The camera opens up to 2.4x
+// exposure under the roof (main.js TUNNEL_EXPOSURE), so the interior is built darker than
+// daylight and reads as a dim concrete tube with bright luminaire rows while the exit, lit by
+// the sun, is blown out. Factors scale the normalised luminaire level (tunnelLight) per surface
+// (tuned at 1.75x, hence the 1.75 / 2.4).
+const TUN_K = 1.75 / 2.4;
+const TUN = { road: 2.4 * TUN_K, paint: 0.62 * TUN_K, wall: 0.36 * TUN_K, rail: 0.34 * TUN_K, ceil: 0.075 * TUN_K, beam: 0.055 * TUN_K, pilaster: 0.36 * TUN_K, tray: 0.16 * TUN_K, upper: 0.2 * TUN_K };
+
+// Catch fence: the mesh coverage comes from the texture alpha (mipmapped, so it averages to a
+// veil far away); seen edge-on a real fence closes up, so the coverage rises towards grazing
+// view angles. One pass (front and back alike), no depth write (it never hides what is behind).
+function fenceMaterial(map) {
+  const m = new THREE.MeshLambertMaterial({ map, vertexColors: true, transparent: true, depthWrite: false, side: THREE.DoubleSide, forceSinglePass: true });
+  m.onBeforeCompile = (sh) => {
+    // thin round wires: lit alike from both sides (as an upward-facing surface, not by the
+    // orientation of the panel), and the coverage rises as the panel is seen edge-on
+    sh.fragmentShader = sh.fragmentShader.replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
+      { float ndv = abs(dot(normalize(vNormal), normalize(vViewPosition)));
+        diffuseColor.a = 1.0 - pow(max(1.0 - diffuseColor.a, 0.0), 1.0 / max(ndv, 0.42));
+        normal = normalize((viewMatrix * vec4(0.25, 1.0, 0.0, 0.0)).xyz); }`);
+  };
+  m.customProgramCacheKey = () => 'fenceGrazing';
+  return m;
+}
+
 export function buildTrackMeshes(T, { racingLine = null, quality = 'high', corridor = null } = {}) {
   const group = new THREE.Group(); group.name = 'track';
   const asph = TX.asphaltSet(quality === 'low' ? 512 : 1024);
   const tex = {
     asphalt: asph.map, asphaltN: asph.normalMap, asphaltR: asph.roughnessMap, macro: TX.macroNoise(256), roadAtlas: TX.roadDetailAtlas(),
     paint: TX.roadPaint(quality === 'low' ? 256 : 512),
-    armco: TX.armco(), ads: TX.adWall(), tecpro: TX.tecpro(),
-    fence: TX.fence(), concrete: TX.concrete(), markers: TX.markerBoards(), barrier: TX.barrierAtlas(),
+    fence: TX.fence(), concrete: TX.concrete(), markers: TX.markerBoards(), barrier: TX.barrierAtlas(), glow: TX.lampGlow(),
   };
   // Large-scale variation (40 m) multiplied into the asphalt so the 3 m tile never repeats
   // visibly (patchy wear, darker / lighter laid sections).
@@ -90,7 +114,9 @@ export function buildTrackMeshes(T, { racingLine = null, quality = 'high', corri
       : new THREE.MeshStandardMaterial({ map: tex.asphalt, normalMap: tex.asphaltN, normalScale: new THREE.Vector2(0.55, 0.55), roughnessMap: tex.asphaltR, roughness: 1.0, metalness: 0.0, vertexColors: true, envMapIntensity: 0.35 })),
     // tunnel floor: baked light (vertex colours) on an unlit material; the factor carries the
     // LED luminaire level onto the dark PBR asphalt albedo (same apparent grey as in daylight)
-    tunnelGround: withMacro(new THREE.MeshBasicMaterial({ map: tex.asphalt, vertexColors: true, color: new THREE.Color(3.4, 3.4, 3.4) })),
+    tunnelGround: withMacro(new THREE.MeshBasicMaterial({ map: tex.asphalt, vertexColors: true, color: new THREE.Color(TUN.road, TUN.road, TUN.road) })),
+    // lines in the tunnel: the paint texture, lit by the same baked luminaire level
+    tunnelPaint: new THREE.MeshBasicMaterial({ map: tex.paint, vertexColors: true, color: new THREE.Color(TUN.paint, TUN.paint, TUN.paint) }),
     // painted kerbs and lines: smoother than the asphalt, keeping some of its relief
     paint: lo
       ? new THREE.MeshLambertMaterial({ map: tex.paint, vertexColors: true })
@@ -100,9 +126,11 @@ export function buildTrackMeshes(T, { racingLine = null, quality = 'high', corri
     tunnelWall: new THREE.MeshBasicMaterial({ map: tex.barrier, vertexColors: true }),
     tunnelRoof: new THREE.MeshBasicMaterial({ map: tex.concrete, vertexColors: true }),
     tunnelShell: new THREE.MeshLambertMaterial({ map: tex.concrete, vertexColors: true }),
-    fence: new THREE.MeshLambertMaterial({ map: tex.fence, alphaTest: 0.3, alphaToCoverage: true, side: THREE.DoubleSide, transparent: false }),
+    // catch-fence mesh: alpha-blended coverage (see TX.fence), denser where it is seen edge-on
+    fence: fenceMaterial(tex.fence),
     lamp: new THREE.MeshBasicMaterial({ color: 0xfff6e6 }),
-    lampHousing: new THREE.MeshBasicMaterial({ color: 0x2b2c2f }),
+    lampHousing: new THREE.MeshBasicMaterial({ color: 0x141517 }),
+    lampGlow: new THREE.MeshBasicMaterial({ map: tex.glow, vertexColors: true, color: new THREE.Color(0.42 * TUN_K, 0.40 * TUN_K, 0.36 * TUN_K), transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, toneMapped: true }),
     markers: new THREE.MeshLambertMaterial({ map: tex.markers, emissive: 0x111111 }),
     gantry: new THREE.MeshLambertMaterial({ color: 0x23262b }),
     lightRed: new THREE.MeshBasicMaterial({ color: 0x401010 }),
@@ -118,12 +146,13 @@ export function buildTrackMeshes(T, { racingLine = null, quality = 'high', corri
     const threshold = 1 + 0.35 * Math.max(0, 1 - into / 70);
     const lateral = 1 - 0.18 * Math.min(1, Math.max(0, Math.abs(d) - 2.6) / 4);
     const height = 0.85 + 0.15 * Math.min(1, h / TUN_H);
-    const daylight = Math.max(0, 1 - Math.min(into, out) / 14) * 0.35;   // spill at the portals
-    return Math.min(1.35, 0.72 * threshold * lateral * height + daylight);
+    const spill = Math.max(0, 1 - Math.min(into, out) / 16);
+    const daylight = spill * spill * 0.85;                             // daylight spill at the portals
+    return Math.min(3.2, 0.72 * threshold * lateral * height + daylight);
   }
   const nChunks = Math.ceil(L / CHUNK);
   const chunks = [];
-  for (let i = 0; i < nChunks; i++) chunks.push({ ground: new Builder(), paint: new Builder(), tground: new Builder(), barrier: new Builder(), twall: new Builder(), roof: new Builder(), shell: new Builder(), fence: new Builder() });
+  for (let i = 0; i < nChunks; i++) chunks.push({ ground: new Builder(), paint: new Builder(), tground: new Builder(), tpaint: new Builder(), barrier: new Builder(), twall: new Builder(), roof: new Builder(), shell: new Builder(), fence: new Builder() });
   const chunkOf = (s) => chunks[Math.min(nChunks - 1, Math.floor(T.wrapS(s) / CHUNK))];
 
   // ---------------------------------------------------------------------------------------------
@@ -154,7 +183,7 @@ export function buildTrackMeshes(T, { racingLine = null, quality = 'high', corri
     const inTun = T.inTunnel((s0 + s1) / 2);
     const ch = chunkOf(s0);
     const G = inTun ? ch.tground : ch.ground;
-    const GP = inTun ? ch.tground : ch.paint;          // kerbs and lines (painted)
+    const GP = inTun ? ch.tpaint : ch.paint;           // kerbs and lines (painted)
     // tunnel: baked light from the two luminaire rows (near-uniform, brighter threshold zone)
     const lampF = (s) => inTun ? tunnelLight(s, 0, 0) : 1;
     const fa = lampF(s0), fb = lampF(s1);
@@ -162,6 +191,12 @@ export function buildTrackMeshes(T, { racingLine = null, quality = 'high', corri
     const band = (d0a, d1a, d0b, d1b, col, dy0 = 0, dy1 = 0, colB = null, Bld = G) => {
       const a = P(s0, d0a, dy0), b = P(s0, d1a, dy1), c = P(s1, d0b, dy0), d = P(s1, d1b, dy1);
       Bld.quad(a, b, c, d, mul(col, fa), uvq(d0a, d1a), mul(colB || col, fb));
+    };
+    // band with a colour across it (c0 along the d0 edge, c1 along the d1 edge)
+    const bandLat = (d0a, d1a, d0b, d1b, c0, c1, Bld = G) => {
+      if (Math.abs(d0a - d1a) < 1e-3 && Math.abs(d0b - d1b) < 1e-3) return;
+      const a = P(s0, d0a), b = P(s0, d1a), c = P(s1, d0b), d = P(s1, d1b);
+      Bld.quad4(a, b, c, d, mul(c0, fa), mul(c1, fa), mul(c0, fb), mul(c1, fb), uvq(d0a, d1a));
     };
     // road surface: rubber laid along the racing line by the tyres (two soft bands at the
     // tyre tracks, merged by line-to-line variation, lighter under the car), plus the white
@@ -171,7 +206,9 @@ export function buildTrackMeshes(T, { racingLine = null, quality = 'high', corri
       const g = (x0, sg) => Math.exp(-((dd - x0) * (dd - x0)) / (2 * sg * sg));
       return Math.min(1, 0.85 * (g(0.8, 0.42) + g(-0.8, 0.42)) + 0.32 * g(0, 1.5));
     };
-    const roadCol = (dd, f) => { const k = 1 - 0.36 * rubberAt(dd); return [C.asphalt[0] * k * f, C.asphalt[1] * k * f, C.asphalt[2] * k * f]; };
+    // in the tunnel the polished surface picks up the two luminaire rows (soft bands at +/-2.6 m)
+    const lampRefl = (d) => inTun ? 1 + 0.32 * (Math.exp(-((d - 2.6) ** 2) / 0.9) + Math.exp(-((d + 2.6) ** 2) / 0.9)) : 1;
+    const roadCol = (dd, f, dAbs = 0) => { const k = (1 - 0.36 * rubberAt(dd)) * lampRefl(dAbs); return [C.asphalt[0] * k * f, C.asphalt[1] * k * f, C.asphalt[2] * k * f]; };
     const OFFS = [2.6, 1.7, 1.25, 0.9, 0.55, 0.25, 0, -0.25, -0.55, -0.9, -1.25, -1.7, -2.6];
     const roadCuts = (S, ld) => {
       const pts = [S.hw, S.hw - 0.12];
@@ -186,15 +223,22 @@ export function buildTrackMeshes(T, { racingLine = null, quality = 'high', corri
     for (let i = 1; i < ra.length - 2; i++) {
       if (ra[i] - ra[i + 1] < 1e-4 && rb[i] - rb[i + 1] < 1e-4) continue;
       const a = P(s0, ra[i]), b = P(s0, ra[i + 1]), c = P(s1, rb[i]), d = P(s1, rb[i + 1]);
-      G.quad4(a, b, c, d, roadCol(ra[i] - lineD0, fa), roadCol(ra[i + 1] - lineD0, fa), roadCol(rb[i] - lineD1, fb), roadCol(rb[i + 1] - lineD1, fb), uvq(ra[i], ra[i + 1]));
+      G.quad4(a, b, c, d, roadCol(ra[i] - lineD0, fa, ra[i]), roadCol(ra[i + 1] - lineD0, fa, ra[i + 1]), roadCol(rb[i] - lineD1, fb, rb[i]), roadCol(rb[i + 1] - lineD1, fb, rb[i + 1]), uvq(ra[i], ra[i + 1]));
     }
     // kerbs: red/white 1 m stripes, slightly raised in the middle
     const stripe = (Math.floor(s0) % 2) ? C.red : C.white;
     if (A.cl > 0.05 || B.cl > 0.05) band(A.hw + A.cl, A.hw, B.hw + B.cl, B.hw, stripe, 0.0, 0.0, null, GP);
     if (A.cr > 0.05 || B.cr > 0.05) band(-A.hw, -A.hw - A.cr, -B.hw, -B.hw - B.cr, stripe, 0.0, 0.0, null, GP);
-    // run-off to the barriers
-    band(A.bl, A.hw + A.cl, B.bl, B.hw + B.cl, C.runoff);
-    band(-A.hw - A.cr, -A.br, -B.hw - B.cr, -B.br, C.runoff);
+    // run-off to the barriers, darkening into the foot of the barrier (contact shadow / grime)
+    {
+      const AO_W = 0.75, dark = mul(C.runoff, 0.42);
+      const wl0 = Math.max(0, Math.min(AO_W, A.bl - A.hw - A.cl)), wl1 = Math.max(0, Math.min(AO_W, B.bl - B.hw - B.cl));
+      bandLat(A.bl, A.bl - wl0, B.bl, B.bl - wl1, dark, C.runoff);
+      band(A.bl - wl0, A.hw + A.cl, B.bl - wl1, B.hw + B.cl, C.runoff);
+      const wr0 = Math.max(0, Math.min(AO_W, A.br - A.hw - A.cr)), wr1 = Math.max(0, Math.min(AO_W, B.br - B.hw - B.cr));
+      band(-A.hw - A.cr, -A.br + wr0, -B.hw - B.cr, -B.br + wr1, C.runoff);
+      bandLat(-A.br + wr0, -A.br, -B.br + wr1, -B.br, C.runoff, dark);
+    }
     if (!inTun) {
       // pavements beyond the barriers (raised 12 cm); pit lane on the start straight
       band(A.bl + A.walkL, A.bl, B.bl + B.walkL, B.bl, C.walk, 0.12, 0.12);
@@ -208,7 +252,7 @@ export function buildTrackMeshes(T, { racingLine = null, quality = 'high', corri
       }
       // retaining walls where the ground falls away behind the pavement (terrain is kept at
       // least 1.2 m below every road and pavement, so this face closes the gap)
-      const RW = ch.barrier, rv0 = 0.004, rv1 = 0.25 - 0.004;      // concrete row of the atlas
+      const RW = ch.barrier, [rv0, rv1] = TX.barrierRowV(TX.BARRIER_ROWS.wall);      // concrete row of the atlas
       for (const side of [1, -1]) {
         const ea = side > 0 ? A.bl + A.walkL : -(A.br + A.walkR), eb = side > 0 ? B.bl + B.walkL : -(B.br + B.walkR);
         const ta = P(s0, ea, 0.12), tb = P(s1, eb, 0.12), ba = P(s0, ea, -6), bb = P(s1, eb, -6);
@@ -353,7 +397,10 @@ export function buildTrackMeshes(T, { racingLine = null, quality = 'high', corri
 
   // ---------------------------------------------------------------------------------------------
   // Barriers (+ fences) per side
-  const BAR_H = 1.05, FENCE_H = 3.6;
+  const BAR_H = 1.05;
+  // catch fence: posts 12 cm behind the rail face, 2.75 m of vertical mesh, then a 0.8 m panel
+  // leaning 0.55 m in over the track (Monaco's debris fences); posts every 4 m
+  const FENCE_BACK = 0.12, FENCE_V = 2.75, FENCE_LEAN = 0.55, FENCE_TOP = 0.6, POST_EVERY = 4, POST_W = 0.09;
   const TUN_LEN = T.deltaS(T.tunnelS[0], T.tunnelS[1]);
   const BEAM_EVERY = 7.5, BEAM0 = 3.75, WALL_OFF = 0.35;
   const beamsIn = (s0, s1) => {       // beam stations (lap s) inside [s0, s1)
@@ -364,56 +411,96 @@ export function buildTrackMeshes(T, { racingLine = null, quality = 'high', corri
     }
     return out;
   };
+  const RV = (name) => TX.barrierRowV(TX.BARRIER_ROWS[name]);
+  const FLAT = RV('flat'), flatUV = [[0.5, FLAT[0]], [0.5, FLAT[1]], [0.6, FLAT[0]], [0.6, FLAT[1]]];
+  // ambient occlusion up the barrier face: darker at the foot where it meets the road
+  const aoH = (y) => 0.55 + 0.45 * Math.min(1, Math.max(0, y) / 0.55);
+  // face profiles [height, protrusion towards the track]; texture v follows the height over
+  // -0.05 .. 1.05 m (the atlas rows are drawn to that scale)
+  const ARMCO_PROF = [[-0.05, 0], [0.10, 0]];
+  for (let i = 0; i < 3; i++) { const y0 = 0.10 + 0.31 * i; ARMCO_PROF.push([y0 + 0.155, 0.095], [y0 + 0.31, i === 2 ? 0 : 0.018]); }
+  ARMCO_PROF.push([BAR_H, 0]);                     // up to the top cap (no slit under it)
+  const BANNER_PROF = [[-0.05, 0], [0.06, 0], [0.09, 0.10], [1.00, 0.10], [1.03, 0], [BAR_H, 0]];
+  const FLAT_PROF = (h) => [[-0.05, 0], [h, 0]];
+  // lighting of a profile strip on the unlit tunnel walls: facing up brighter, down darker
+  const stripShade = (pa, pb) => (pb[1] < pa[1] ? 1.12 : pb[1] > pa[1] ? 0.72 : 1);
+  // extrude a profile along [s0, s1] at barrier offsets o0 / o1 (side: +1 left, -1 right)
+  const extrude = (Bld, side, s0, s1, o0, o1, y0a, y0b, prof, [v0, v1], us, colAt, { tunnelShade = false } = {}) => {
+    const fu = side > 0 ? 1 : -1;
+    const vAt = (h) => v0 + (v1 - v0) * Math.max(0, Math.min(1, (h + 0.05) / 1.10));
+    for (let i = 0; i + 1 < prof.length; i++) {
+      const [ha, pa] = prof[i], [hb, pb] = prof[i + 1];
+      const qa0 = T.pointAt(s0, o0 - side * pa), qb0 = T.pointAt(s0, o0 - side * pb), qa1 = T.pointAt(s1, o1 - side * pa), qb1 = T.pointAt(s1, o1 - side * pb);
+      const a = [qa0.x, y0a + ha, qa0.z], b = [qb0.x, y0a + hb, qb0.z], c = [qa1.x, y0b + ha, qa1.z], d = [qb1.x, y0b + hb, qb1.z];
+      const k = tunnelShade ? stripShade(prof[i], prof[i + 1]) : 1;
+      const ca = mul(colAt(s0, ha), k), cb = mul(colAt(s0, hb), k), cc = mul(colAt(s1, ha), k), cd = mul(colAt(s1, hb), k);
+      const ua = [fu * s0 / us, vAt(ha)], ub = [fu * s0 / us, vAt(hb)], uc = [fu * s1 / us, vAt(ha)], ud = [fu * s1 / us, vAt(hb)];
+      if (side > 0) Bld.quad4(b, a, d, c, cb, ca, cd, cc, [ub, ua, ud, uc]);
+      else Bld.quad4(a, b, c, d, ca, cb, cc, cd, [ua, ub, uc, ud]);
+    }
+  };
+  // a box-section post along a polyline of [height, protrusion] points at lap s
+  const post = (Bld, side, s, o, y0, pts, col) => {
+    const hw = POST_W / 2;
+    for (let i = 0; i + 1 < pts.length; i++) {
+      const [ha, pa] = pts[i], [hb, pb] = pts[i + 1];
+      const corner = (ds, dp, h, p) => { const q = T.pointAt(s + ds, o - side * (p + dp)); return [q.x, y0 + h, q.z]; };
+      // front (towards the track) and the two sides
+      const fa0 = corner(-hw, hw, ha, pa), fa1 = corner(hw, hw, ha, pa), fb0 = corner(-hw, hw, hb, pb), fb1 = corner(hw, hw, hb, pb);
+      const ba0 = corner(-hw, -hw, ha, pa), ba1 = corner(hw, -hw, ha, pa), bb0 = corner(-hw, -hw, hb, pb), bb1 = corner(hw, -hw, hb, pb);
+      const quads = side > 0 ? [[fa1, fa0, fb1, fb0], [ba0, fa0, bb0, fb0], [fa1, ba1, fb1, bb1]] : [[fa0, fa1, fb0, fb1], [fa0, ba0, fb0, bb0], [ba1, fa1, bb1, fb1]];
+      quads.forEach(([a, b, c, d], j) => Bld.quad(a, b, c, d, mul(col, j ? 0.8 : 1), flatUV));
+    }
+  };
+  // which ad set a banner section shows (varies along the lap)
+  const adRow = (s) => ['ads', 'ads2', 'ads3'][Math.floor(T.wrapS(s) / 96) % 3];
   for (const side of [1, -1]) {
     let skipUntil = -1;
     for (let s0 = 0; s0 < L; s0 += 1) {
       if (s0 < skipUntil) continue;
       const typ = barrierType(T, s0 + 0.5, side);
-      // the tunnel bends gently (R >= 239 m): 2 m segments there (2 mm sagitta)
-      const s1 = s0 + (typ === 'tunnel' && T.inTunnel(s0 + 1.5) && s0 + 2 <= L ? 2 : 1);
+      // 2 m segments where the barrier bends gently (R > 80 m: < 6 mm sagitta) - the tunnel
+      // (R >= 239 m) and most straights - and 1 m through the corners
+      const gentle = s0 + 2 <= L && [0, 1, 2].every((k) => Math.abs(T.curv[T.idxOfS(s0 + k)]) < 1 / 80) && barrierType(T, s0 + 1.5, side) === typ;
+      const s1 = s0 + (gentle ? 2 : 1);
       skipUntil = s1;
       const ch = chunkOf(s0);
       const off = (s) => side > 0 ? T.sample(T.barL, s) : -T.sample(T.barR, s);
       const o0 = off(s0), o1 = off(s1);
       const y0a = T.heightAt(s0, o0), y0b = T.heightAt(s1, o1);
-      const pa = T.pointAt(s0, o0), pb = T.pointAt(s1, o1);
       const backA = T.pointAt(s0, o0 + side * 0.3), backB = T.pointAt(s1, o1 + side * 0.3);
       if (typ === 'tunnel') {
-        // armco (sparse sponsor boards) in front of a light concrete wall with pilasters
+        // armco (sparse sponsor boards) in front of a painted concrete wall with pilasters
         const W = ch.twall;
-        const fu = side > 0 ? 1 : -1;
         const into = T.deltaS(T.tunnelS[0], s0);
         const board = Math.floor(into / 62) % 2 === 1 && (into % 62) < 7;
-        const row = board ? TX.BARRIER_ROWS.ads : TX.BARRIER_ROWS.armco;
-        const v0 = 1 - (row + 1) / 4 + 0.004, v1 = 1 - row / 4 - 0.004;
-        const us = board ? 16 : 4;
-        const la = tunnelLight(s0, o0, 0.6), lb = tunnelLight(s1, o1, 0.6);
-        const a = [pa.x, y0a - 0.05, pa.z], b = [pa.x, y0a + BAR_H, pa.z], c = [pb.x, y0b - 0.05, pb.z], d = [pb.x, y0b + BAR_H, pb.z];
-        const uv = [[fu * s0 / us, v0], [fu * s0 / us, v1], [fu * s1 / us, v0], [fu * s1 / us, v1]];
-        if (side > 0) W.quad(b, a, d, c, mul([1, 1, 1], la), [uv[1], uv[0], uv[3], uv[2]], mul([1, 1, 1], lb));
-        else W.quad(a, b, c, d, mul([1, 1, 1], la), uv, mul([1, 1, 1], lb));
+        const railCol = (sq, h) => mul([1, 1, 1], tunnelLight(sq, off(sq), h) * TUN.rail * aoH(h));
+        if (board) extrude(W, side, s0, s1, o0, o1, y0a, y0b, BANNER_PROF, RV('ads'), 16, railCol, { tunnelShade: true });
+        else extrude(W, side, s0, s1, o0, o1, y0a, y0b, ARMCO_PROF, RV('armco'), 4, railCol, { tunnelShade: true });
         // rail top cap back to the wall (closes the gap behind the armco)
         const wo = side * WALL_OFF;
         const qa = T.pointAt(s0, o0 + wo), qb = T.pointAt(s1, o1 + wo);
+        const pa = T.pointAt(s0, o0), pb = T.pointAt(s1, o1);
         {
-          const e = [qa.x, y0a + BAR_H, qa.z], f2 = [qb.x, y0b + BAR_H, qb.z];
-          const cc = mul([0.5, 0.5, 0.5], la), cuv = [[0, 0.1], [0, 0.1], [0, 0.1], [0, 0.1]];
-          if (side > 0) W.quad(e, b, f2, d, cc, cuv); else W.quad(b, e, d, f2, cc, cuv);
+          const b = [pa.x, y0a + BAR_H - 0.02, pa.z], d = [pb.x, y0b + BAR_H - 0.02, pb.z];
+          const e = [qa.x, y0a + BAR_H - 0.02, qa.z], f2 = [qb.x, y0b + BAR_H - 0.02, qb.z];
+          const cc = mul([0.5, 0.5, 0.5], tunnelLight(s0, o0, 1) * TUN.rail);
+          if (side > 0) W.quad(e, b, f2, d, cc, flatUV); else W.quad(b, e, d, f2, cc, flatUV);
         }
-        // concrete wall behind the rail, up to the cable tray at 4.6 m; light grey, cleaner
-        // towards the luminaires, a grime band just above the rail
+        // painted concrete wall behind the rail, up to the cable tray at 4.6 m: grime band above
+        // the rail, brighter towards the luminaires
         const ya = qa.y, yb = qb.y;
-        const wv0 = 0.004, wv1 = 0.25 - 0.004;           // concrete row of the atlas
-        const H0 = BAR_H, H1 = 4.6, nb = 3;
-        const wcol = (sq, d, h, g) => mul([1.0, 0.98, 0.94], tunnelLight(sq, d, h) * g);
+        const [wv0, wv1] = RV('tunnel');
+        const H0 = BAR_H - 0.02, H1 = 4.6;
+        const wcol = (sq, d, h, g) => mul([1.0, 0.97, 0.92], tunnelLight(sq, d, h) * g * TUN.wall);
         {
           const A2 = [qa.x, ya + H0, qa.z], B2 = [qa.x, ya + H1, qa.z], C2 = [qb.x, yb + H0, qb.z], D2 = [qb.x, yb + H1, qb.z];
-          const g0 = 0.55, g1 = 0.92;
+          const g0 = 0.62, g1 = 1.0;
           const ca = wcol(s0, o0, H0, g0), cb = wcol(s0, o0, H1, g1), cc = wcol(s1, o1, H0, g0), cd = wcol(s1, o1, H1, g1);
-          const vv = (h) => wv0 + (wv1 - wv0) * (h / H1);
-          const wuv = [[fu * s0 / 3, vv(H0)], [fu * s0 / 3, vv(H1)], [fu * s1 / 3, vv(H0)], [fu * s1 / 3, vv(H1)]];
-          if (side > 0) { W.tri(B2, A2, D2, cb, ca, cd, wuv[1], wuv[0], wuv[3]); W.tri(A2, C2, D2, ca, cc, cd, wuv[0], wuv[2], wuv[3]); }
-          else { W.tri(A2, B2, C2, ca, cb, cc, wuv[0], wuv[1], wuv[2]); W.tri(B2, D2, C2, cb, cd, cc, wuv[1], wuv[3], wuv[2]); }
+          const fu = side > 0 ? 1 : -1;
+          const wuv = [[fu * s0 / 3, wv0], [fu * s0 / 3, wv1], [fu * s1 / 3, wv0], [fu * s1 / 3, wv1]];
+          if (side > 0) W.quad4(B2, A2, D2, C2, cb, ca, cd, cc, [wuv[1], wuv[0], wuv[3], wuv[2]]);
+          else W.quad4(A2, B2, C2, D2, ca, cb, cc, cd, wuv);
         }
         // pilasters under each ceiling beam
         for (const sb of beamsIn(s0, s1)) {
@@ -421,54 +508,69 @@ export function buildTrackMeshes(T, { racingLine = null, quality = 'high', corri
           const ob = off(sb), yb0 = T.pointAt(sb, ob + wo).y;
           const p0 = T.pointAt(sb - pw / 2, ob + wo - side * pdp), p1 = T.pointAt(sb + pw / 2, ob + wo - side * pdp);
           const r0 = T.pointAt(sb - pw / 2, ob + wo + side * 0.02), r1 = T.pointAt(sb + pw / 2, ob + wo + side * 0.02);
-          const lc = mul([0.95, 0.93, 0.9], tunnelLight(sb, ob, 3)), puv = [[0.02, 0.02], [0.02, 0.2], [0.04, 0.02], [0.04, 0.2]];
+          const lc = mul([0.95, 0.93, 0.9], tunnelLight(sb, ob, 3) * TUN.pilaster);
           const fA = [p0.x, yb0 + H0, p0.z], fB = [p0.x, yb0 + H1, p0.z], fC = [p1.x, yb0 + H0, p1.z], fD = [p1.x, yb0 + H1, p1.z];
           const sA = [r0.x, yb0 + H0, r0.z], sB = [r0.x, yb0 + H1, r0.z], sC = [r1.x, yb0 + H0, r1.z], sD = [r1.x, yb0 + H1, r1.z];
           if (side > 0) {
-            W.quad(fB, fA, fD, fC, lc, puv);
-            W.quad(sB, sA, fB, fA, mul(lc, 0.75), puv);
-            W.quad(fD, fC, sD, sC, mul(lc, 0.75), puv);
+            W.quad(fB, fA, fD, fC, lc, flatUV);
+            W.quad(sB, sA, fB, fA, mul(lc, 0.7), flatUV);
+            W.quad(fD, fC, sD, sC, mul(lc, 0.7), flatUV);
           } else {
-            W.quad(fA, fB, fC, fD, lc, puv);
-            W.quad(sA, sB, fA, fB, mul(lc, 0.75), puv);
-            W.quad(fC, fD, sC, sD, mul(lc, 0.75), puv);
+            W.quad(fA, fB, fC, fD, lc, flatUV);
+            W.quad(sA, sB, fA, fB, mul(lc, 0.7), flatUV);
+            W.quad(fC, fD, sC, sD, mul(lc, 0.7), flatUV);
           }
         }
         // cable tray along the wall top, then plain wall up into the ceiling slab
         {
           const k0 = T.pointAt(s0, o0 + wo - side * 0.42), k1 = T.pointAt(s1, o1 + wo - side * 0.42);
-          const tc = mul([0.55, 0.55, 0.56], tunnelLight(s0, o0, 4.6)), uvc = [[0.02, 0.02], [0.02, 0.03], [0.03, 0.02], [0.03, 0.03]];
+          const tc = mul([0.55, 0.55, 0.56], tunnelLight(s0, o0, 4.6) * TUN.tray / 0.55);
           const kA = [k0.x, ya + H1, k0.z], kB = [k0.x, ya + H1 + 0.28, k0.z], kC = [k1.x, yb + H1, k1.z], kD = [k1.x, yb + H1 + 0.28, k1.z];
-          if (side > 0) W.quad(kB, kA, kD, kC, tc, uvc); else W.quad(kA, kB, kC, kD, tc, uvc);
+          if (side > 0) W.quad(kB, kA, kD, kC, tc, flatUV); else W.quad(kA, kB, kC, kD, tc, flatUV);
           const wA = [qa.x, ya + H1, qa.z], wC = [qb.x, yb + H1, qb.z];
           // underside of the tray, facing down to the road
-          if (side > 0) W.quad(kA, wA, kC, wC, mul(tc, 0.6), uvc); else W.quad(wA, kA, wC, kC, mul(tc, 0.6), uvc);
+          if (side > 0) W.quad(kA, wA, kC, wC, mul(tc, 0.5), flatUV); else W.quad(wA, kA, wC, kC, mul(tc, 0.5), flatUV);
           // wall above the tray; runs 5 cm past the ceiling so the joint has no crack
           const uA = [qa.x, ya + H1 + 0.28, qa.z], uB = [qa.x, ya + TUN_H + 0.05, qa.z], uC = [qb.x, yb + H1 + 0.28, qb.z], uD = [qb.x, yb + TUN_H + 0.05, qb.z];
-          const uc = mul([0.8, 0.79, 0.76], tunnelLight(s0, o0, 5.4)), uuv = [[0.02, 0.1], [0.02, 0.2], [0.04, 0.1], [0.04, 0.2]];
-          if (side > 0) W.quad(uB, uA, uD, uC, uc, uuv); else W.quad(uA, uB, uC, uD, uc, uuv);
+          const uc = mul([0.8, 0.79, 0.76], tunnelLight(s0, o0, 5.4) * TUN.upper);
+          if (side > 0) W.quad(uB, uA, uD, uC, uc, flatUV); else W.quad(uA, uB, uC, uD, uc, flatUV);
         }
         continue;
       }
       const B = ch.barrier;
-      const row = TX.BARRIER_ROWS[typ === 'pitwall' ? 'wall' : typ] ?? 0;
-      const v0 = 1 - (row + 1) / 4 + 0.004, v1 = 1 - row / 4 - 0.004;
       const h = typ === 'tecpro' ? 1.2 : typ === 'pitwall' ? 1.2 : BAR_H;
-      const uScale = typ === 'ads' ? 16 : 4;
-      const a = [pa.x, y0a - 0.05, pa.z], b = [pa.x, y0a + h, pa.z], c = [pb.x, y0b - 0.05, pb.z], d = [pb.x, y0b + h, pb.z];
-      const fu = side > 0 ? 1 : -1;
-      const uv = [[fu * s0 / uScale, v0], [fu * s0 / uScale, v1], [fu * s1 / uScale, v0], [fu * s1 / uScale, v1]];
-      const col = [1, 1, 1];
-      if (side > 0) B.quad(b, a, d, c, col, [uv[1], uv[0], uv[3], uv[2]]); else B.quad(a, b, c, d, col, uv);
-      // top cap
-      const e = [backA.x, y0a + h, backA.z], f2 = [backB.x, y0b + h, backB.z];
-      const capCol = [0.8, 0.8, 0.8], cuv = [[0, 0.1], [0, 0.1], [0, 0.1], [0, 0.1]];
-      if (side > 0) B.quad(e, b, f2, d, capCol, cuv); else B.quad(b, e, d, f2, capCol, cuv);
-      // catch fence on top (not where buildings press right up to the barrier in the old town)
-      if (typ !== 'tecpro' && !(typ === 'pitwall')) {
-        const fa = [pa.x, y0a + h, pa.z], fb2 = [pa.x, y0a + h + FENCE_H, pa.z], fc = [pb.x, y0b + h, pb.z], fd = [pb.x, y0b + h + FENCE_H, pb.z];
-        const fuv = [[s0 / 4, 0], [s0 / 4, 1], [s1 / 4, 0], [s1 / 4, 1]];
-        ch.fence.quad(fa, fb2, fc, fd, [1, 1, 1], fuv);
+      const white = (sq, hh) => mul([1, 1, 1], aoH(hh));
+      if (typ === 'armco') extrude(B, side, s0, s1, o0, o1, y0a, y0b, ARMCO_PROF, RV('armco'), 4, white);
+      else if (typ === 'ads') extrude(B, side, s0, s1, o0, o1, y0a, y0b, BANNER_PROF, RV(adRow(s0)), 16, white);
+      else extrude(B, side, s0, s1, o0, o1, y0a, y0b, FLAT_PROF(h), RV(typ === 'pitwall' ? 'wall' : 'tecpro'), typ === 'tecpro' ? 8 : 4, white);
+      // top cap back over the posts
+      {
+        const pa = T.pointAt(s0, o0), pb = T.pointAt(s1, o1);
+        const b = [pa.x, y0a + h, pa.z], d = [pb.x, y0b + h, pb.z];
+        const e = [backA.x, y0a + h, backA.z], f2 = [backB.x, y0b + h, backB.z];
+        const capCol = typ === 'armco' || typ === 'ads' ? [0.5, 0.52, 0.55] : [0.78, 0.78, 0.78];
+        if (side > 0) B.quad(e, b, f2, d, capCol, flatUV); else B.quad(b, e, d, f2, capCol, flatUV);
+      }
+      // catch fence on top (not on the Tecpro blocks and the pit wall)
+      if (typ !== 'tecpro' && typ !== 'pitwall') {
+        const fo0 = o0 + side * FENCE_BACK, fo1 = o1 + side * FENCE_BACK;
+        const prof = [[h, 0], [h + FENCE_V, 0], [h + FENCE_V + FENCE_TOP, FENCE_LEAN]];
+        let vAcc = 0;
+        for (let i = 0; i + 1 < prof.length; i++) {
+          const [ha, pa] = prof[i], [hb, pb] = prof[i + 1];
+          const seg = Math.hypot(hb - ha, pb - pa);
+          const qa0 = T.pointAt(s0, fo0 - side * pa), qb0 = T.pointAt(s0, fo0 - side * pb), qa1 = T.pointAt(s1, fo1 - side * pa), qb1 = T.pointAt(s1, fo1 - side * pb);
+          const a = [qa0.x, y0a + ha, qa0.z], b = [qb0.x, y0a + hb, qb0.z], c = [qa1.x, y0b + ha, qa1.z], d = [qb1.x, y0b + hb, qb1.z];
+          const uv = [[s0 / 0.8, vAcc / 0.8], [s0 / 0.8, (vAcc + seg) / 0.8], [s1 / 0.8, vAcc / 0.8], [s1 / 0.8, (vAcc + seg) / 0.8]];
+          ch.fence.quad(a, b, c, d, [1, 1, 1], uv);
+          vAcc += seg;
+        }
+        // posts (painted steel) every 4 m, from behind the rails up through the leaning top
+        const sp = Math.ceil(s0 / POST_EVERY) * POST_EVERY;
+        if (sp < s1) {
+          const op = off(sp) + side * FENCE_BACK;
+          post(B, side, sp, op + side * POST_W * 0.6, T.heightAt(sp, off(sp)), [[h - 0.25, 0], [h + FENCE_V, 0], [h + FENCE_V + FENCE_TOP, FENCE_LEAN]], [0.33, 0.36, 0.35]);
+        }
       }
     }
   }
@@ -476,7 +578,7 @@ export function buildTrackMeshes(T, { racingLine = null, quality = 'high', corri
   // Tunnel ceiling: a continuous slab (no gaps, single surface facing down) with transverse
   // beams every 7.5 m and two rows of luminaires; a solid roof slab and outer shell above /
   // beside it (they cast the shadow that keeps the car out of the sun inside); portal frames.
-  const lamps = new Builder(), housings = new Builder();
+  const lamps = new Builder(), housings = new Builder(), glows = new Builder();
   {
     const [t0, t1] = T.tunnelS;
     const len = TUN_LEN;
@@ -493,8 +595,8 @@ export function buildTrackMeshes(T, { racingLine = null, quality = 'high', corri
         const fA = i / across, fB = (i + 1) / across;
         const dA0 = l0 + (r0 - l0) * fA, dB0 = l0 + (r0 - l0) * fB, dA1 = l1 + (r1 - l1) * fA, dB1 = l1 + (r1 - l1) * fB;
         const a = P(s0, dA0, TUN_H + camber(fA)), b = P(s0, dB0, TUN_H + camber(fB)), c = P(s1, dA1, TUN_H + camber(fA)), d = P(s1, dB1, TUN_H + camber(fB));
-        const ca = mul([0.62, 0.61, 0.6], tunnelLight(s0, dA0, TUN_H)), cb = mul([0.62, 0.61, 0.6], tunnelLight(s0, dB0, TUN_H));
-        const cc = mul([0.62, 0.61, 0.6], tunnelLight(s1, dA1, TUN_H)), cd = mul([0.62, 0.61, 0.6], tunnelLight(s1, dB1, TUN_H));
+        const cl = (sq, d) => mul([1, 0.99, 0.97], tunnelLight(sq, d, TUN_H) * TUN.ceil);
+        const ca = cl(s0, dA0), cb = cl(s0, dB0), cc = cl(s1, dA1), cd = cl(s1, dB1);
         const uv = [[dA0 / 3, s0 / 3], [dB0 / 3, s0 / 3], [dA1 / 3, s1 / 3], [dB1 / 3, s1 / 3]];
         // one continuous surface facing down (visible from the road)
         ch.roof.tri(b, a, d, cb, ca, cd, uv[1], uv[0], uv[3]); ch.roof.tri(a, c, d, ca, cc, cd, uv[0], uv[2], uv[3]);
@@ -522,7 +624,7 @@ export function buildTrackMeshes(T, { racingLine = null, quality = 'high', corri
         const dA = l + (r - l) * fA, dB = l + (r - l) * fB;
         const yA = TUN_H + camber(fA), yB = TUN_H + camber(fB);
         const a = P(sb - bw / 2, dA, yA - bd), b = P(sb - bw / 2, dB, yB - bd), c = P(sb + bw / 2, dA, yA - bd), d = P(sb + bw / 2, dB, yB - bd);
-        const bc = mul([0.5, 0.5, 0.5], tunnelLight(sb, dA, TUN_H)), sc2 = mul(bc, 0.8), z2 = [0, 0];
+        const bc = mul([1, 1, 1], tunnelLight(sb, dA, TUN_H) * TUN.beam), sc2 = mul(bc, 1.4), z2 = [0, 0];
         ch.roof.tri(b, a, d, bc, bc, bc, z2, z2, z2); ch.roof.tri(a, c, d, bc, bc, bc, z2, z2, z2);
         const a2 = P(sb - bw / 2, dA, yA + 0.02), b2 = P(sb - bw / 2, dB, yB + 0.02);
         ch.roof.tri(a2, a, b2, sc2, sc2, sc2, z2, z2, z2); ch.roof.tri(a, b, b2, sc2, sc2, sc2, z2, z2, z2);
@@ -544,6 +646,13 @@ export function buildTrackMeshes(T, { racingLine = null, quality = 'high', corri
         // dark housing 2 cm above the diffuser, slightly larger (visible as a rim)
         const h0 = P(sl - 0.06, dd - 0.27, y + 0.02), h1 = P(sl + 1.56, dd - 0.27, y + 0.02), h2 = P(sl - 0.06, dd + 0.27, y + 0.02), h3 = P(sl + 1.56, dd + 0.27, y + 0.02);
         housings.quad(h0, h2, h1, h3, [1, 1, 1], z4);
+        // glare: a soft additive halo in the plane of the ceiling, and one across the tunnel
+        // (seen almost face-on by the driver) so each fitting reads as a light source
+        const gl = [[0, 0], [1, 0], [0, 1], [1, 1]];
+        const g0 = P(sl - 0.55, dd - 0.6, y - 0.01), g1 = P(sl - 0.55, dd + 0.6, y - 0.01), g2 = P(sl + 2.05, dd - 0.6, y - 0.01), g3 = P(sl + 2.05, dd + 0.6, y - 0.01);
+        glows.quad(g0, g1, g2, g3, [1, 1, 1], gl);
+        const v0 = P(sl + 0.75, dd - 0.55, y - 0.32), v1 = P(sl + 0.75, dd + 0.55, y - 0.32), v2 = P(sl + 0.75, dd - 0.55, y + 0.1), v3 = P(sl + 0.75, dd + 0.55, y + 0.1);
+        glows.quad(v0, v1, v2, v3, [0.8, 0.8, 0.8], [[0, 0.1], [1, 0.1], [0, 0.9], [1, 0.9]]);
       }
     }
     // portal frames at both ends: a concrete face from the wall planes / ceiling outwards
@@ -585,6 +694,7 @@ export function buildTrackMeshes(T, { racingLine = null, quality = 'high', corri
     add(ch.ground, M.ground, { receive: true, name: 'ground' });
     add(ch.paint, M.paint, { receive: true, name: 'roadPaint' });
     add(ch.tground, M.tunnelGround, { name: 'tunnelGround' });
+    add(ch.tpaint, M.tunnelPaint, { name: 'tunnelPaint' });
     add(ch.barrier, M.barrier, { receive: true, name: 'barriers' });
     add(ch.twall, M.tunnelWall, { name: 'tunnelWall' });
     add(ch.roof, M.tunnelRoof, { name: 'tunnelCeiling' });
@@ -594,6 +704,7 @@ export function buildTrackMeshes(T, { racingLine = null, quality = 'high', corri
   }
   if (!lamps.empty) { const lm = new THREE.Mesh(lamps.geometry(), M.lamp); lm.matrixAutoUpdate = false; lm.name = 'tunnelLamps'; group.add(lm); }
   if (!housings.empty) { const hm = new THREE.Mesh(housings.geometry(), M.lampHousing); hm.matrixAutoUpdate = false; group.add(hm); }
+  if (!glows.empty) { const gm = new THREE.Mesh(glows.geometry(), M.lampGlow); gm.matrixAutoUpdate = false; gm.name = 'tunnelGlow'; gm.renderOrder = 2; group.add(gm); }
 
   // ---------------------------------------------------------------------------------------------
   // braking markers (150 / 100 / 50) on the outside fence before the heavy stops

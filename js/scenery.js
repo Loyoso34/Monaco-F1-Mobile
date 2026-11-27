@@ -5,7 +5,7 @@ import * as THREE from 'three';
 import * as TX from './textures.js';
 import { mergeGeometries } from 'three/addons/BufferGeometryUtils.js';
 import { buildCorridor, footprintClear, terrainLimit, clearBarAt } from './corridor.js';
-import { makeFacadeAtlas, CityBuilder, ROW, vRow, ATLAS_BAYS } from './city.js';
+import { makeFacadeAtlas, CityBuilder, ROW, vRow, ATLAS_BAYS, addFacadeRecess } from './city.js';
 
 function rng(seed) { let s = seed >>> 0; return () => ((s = (s * 1664525 + 1013904223) >>> 0) / 4294967296); }
 const R = rng(20240526);
@@ -69,14 +69,17 @@ export function buildScenery(T, { quality = 'high', renderer = null, corridor = 
   const sunDir = new THREE.Vector3(-0.42, 0.78, 0.46).normalize();     // SW, afternoon
   const skyMat = new THREE.ShaderMaterial({
     side: THREE.BackSide, depthWrite: false, fog: false,
-    uniforms: { sunDir: { value: sunDir }, top: { value: new THREE.Color(0x2a66b3) }, mid: { value: new THREE.Color(0x86b4dd) }, hor: { value: new THREE.Color(0xdde8ee) } },
+    // expo: the camera exposure relative to daylight (main.js) - under the tunnel roof the
+    // camera opens up and the sky beyond the portals blows out like the sun-lit street
+    uniforms: { sunDir: { value: sunDir }, top: { value: new THREE.Color(0x2a66b3) }, mid: { value: new THREE.Color(0x86b4dd) }, hor: { value: new THREE.Color(0xdde8ee) }, expo: { value: 1 } },
     vertexShader: 'varying vec3 vDir; void main(){ vDir = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); gl_Position.z = gl_Position.w; }',
-    fragmentShader: `varying vec3 vDir; uniform vec3 sunDir, top, mid, hor;
+    fragmentShader: `varying vec3 vDir; uniform vec3 sunDir, top, mid, hor; uniform float expo;
       void main(){ float h = clamp(vDir.y, -0.2, 1.0);
         vec3 c = mix(hor, mid, smoothstep(0.0, 0.18, h)); c = mix(c, top, smoothstep(0.18, 0.75, h));
         c = mix(c, vec3(0.80,0.84,0.86), smoothstep(0.02, -0.2, h));
         float sd = max(dot(normalize(vDir), sunDir), 0.0);
         c += vec3(1.0,0.92,0.75) * (pow(sd, 900.0) * 6.0 + pow(sd, 12.0) * 0.22);
+        c *= expo; c = mix(c, vec3(1.0), clamp((expo - 1.0) * 0.35, 0.0, 0.6));
         gl_FragColor = vec4(c, 1.0); }`,
   });
   const sky = new THREE.Mesh(new THREE.SphereGeometry(4500, 32, 16), skyMat);
@@ -196,6 +199,7 @@ export function buildScenery(T, { quality = 'high', renderer = null, corridor = 
   // one facade atlas and one material for every building (js/city.js)
   const atlas = makeFacadeAtlas();
   const cityMat = new THREE.MeshLambertMaterial({ map: atlas, vertexColors: true });
+  if (!lo) addFacadeRecess(cityMat, atlas.userData.recess);
   const BLD = [];
   // district character along the lap and inland (Monaco's quarters)
   const PAL = {
@@ -618,21 +622,32 @@ export function buildScenery(T, { quality = 'high', renderer = null, corridor = 
     }
   }
 
-  // ---- grandstands -------------------------------------------------------------------------
-  const crowdTex = TX.crowd(hi ? 1 : 0.6);
-  crowdTex.repeat.set(1, 1);
-  const standMat = new THREE.MeshLambertMaterial({ map: crowdTex });
+  // ---- grandstands (kept empty) -----------------------------------------------------------
+  // concrete terraces with rows of red moulded seats and aisles; a white canopy on a frame
+  const seatTex = TX.seats();
+  const seatMat = new THREE.MeshLambertMaterial({ map: seatTex });
+  const stepMat = new THREE.MeshLambertMaterial({ color: 0xb4b8bc });
   const standFrame = new THREE.MeshLambertMaterial({ color: 0xbfc4c9 });
   const roofMat = new THREE.MeshLambertMaterial({ color: 0xf2f2f2, side: THREE.DoubleSide });
+  const railMat = new THREE.MeshLambertMaterial({ color: 0x30343a });
   for (const { k, p, fcx, fcz, rot } of STAND_SEGS) {
     const g = new THREE.Group();
     const rows = 8, rise = 1.0, run = 1.4, w = 23;
     for (let r = 0; r < rows; r++) {
-      const step = new THREE.Mesh(new THREE.BoxGeometry(w, rise, run), standMat);
+      const step = new THREE.Mesh(new THREE.BoxGeometry(w, rise, run), stepMat);
       step.position.set(0, 1.5 + r * rise, -(r * run));
       g.add(step);
+      // the seat row stands on the tread in front of the next riser (texture repeats every 8 m)
+      const sg = new THREE.PlaneGeometry(w, 0.8);
+      const uv = sg.attributes.uv; for (let i = 0; i < uv.count; i++) uv.setX(i, uv.getX(i) * w / 8 + (r % 2) * 0.5);
+      const seatsRow = new THREE.Mesh(sg, seatMat);
+      seatsRow.position.set(0, 1.5 + r * rise + rise / 2 + 0.4, -(r * run) - run / 2 + 0.38);
+      g.add(seatsRow);
     }
     const back = new THREE.Mesh(new THREE.BoxGeometry(w, rows * rise + 4, 0.4), standFrame); back.position.set(0, (rows * rise + 4) / 2, -rows * run - 0.2); g.add(back);
+    // front railing on the lowest terrace
+    const rail = new THREE.Mesh(new THREE.BoxGeometry(w, 0.06, 0.06), railMat); rail.position.set(0, 1.5 + rise / 2 + 1.0, run / 2 - 0.05); g.add(rail);
+    for (let x = -w / 2 + 0.5; x <= w / 2; x += 2.3) { const pst = new THREE.Mesh(new THREE.BoxGeometry(0.05, 1.0, 0.05), railMat); pst.position.set(x, 1.5 + rise / 2 + 0.5, run / 2 - 0.05); g.add(pst); }
     const roof = new THREE.Mesh(new THREE.PlaneGeometry(w, rows * run + 2), roofMat); roof.rotation.x = -Math.PI / 2 + 0.12; roof.position.set(0, rows * rise + 5, -rows * run / 2); g.add(roof);
     // face the track (local -z points away from it); stands on the lowest ground under it
     g.position.set(p.x, Math.min(T.py[k] - 0.5, groundMin(fcx, fcz, rot, 12.6, 23.4) + 0.2), p.z);
@@ -642,26 +657,64 @@ export function buildScenery(T, { quality = 'high', renderer = null, corridor = 
   const cs = (id) => corner(id);
 
   // ---- yachts ------------------------------------------------------------------------------
+  // motor yachts: a raked hull with a sheer line rising to the bow and a dark boot stripe at
+  // the waterline, stepped superstructure decks wrapped in tinted glass bands, a flybridge
+  // with a radar arch and dome, and a swim platform at the stern (all merged by material)
   const hullMat = new THREE.MeshLambertMaterial({ color: 0xf4f6f8 });
   const hullDark = new THREE.MeshLambertMaterial({ color: 0x14213d });
-  const deckMat = new THREE.MeshLambertMaterial({ color: 0x9aa7b3 });
+  const bootMat = new THREE.MeshLambertMaterial({ color: 0x1b2433 });
+  const deckMat = new THREE.MeshLambertMaterial({ color: 0xb89a74 });            // teak decks
+  const glassBand = new THREE.MeshStandardMaterial({ color: 0x18222e, roughness: 0.12, metalness: 0.35, envMapIntensity: 1.2 });
+  const steelMat = new THREE.MeshLambertMaterial({ color: 0xd9dde2 });
+  const hullShape = (len, wid, inset = 0) => {
+    const w = wid / 2 - inset, L0 = inset, L1 = len - inset * 1.6;
+    const sh = new THREE.Shape();
+    sh.moveTo(-w * 0.92, L0); sh.lineTo(w * 0.92, L0);                         // transom
+    sh.quadraticCurveTo(w, L0 + 0.02 * len, w, L0 + 0.12 * len); sh.lineTo(w, L1 * 0.62);
+    sh.quadraticCurveTo(w, L1 * 0.88, 0, L1); sh.quadraticCurveTo(-w, L1 * 0.88, -w, L1 * 0.62);
+    sh.lineTo(-w, L0 + 0.12 * len); sh.quadraticCurveTo(-w, L0 + 0.02 * len, -w * 0.92, L0);
+    return sh;
+  };
   const yachtGeo = (len, wid, decks) => {
     const g = new THREE.Group();
-    const shape = new THREE.Shape();
-    shape.moveTo(-wid / 2, 0); shape.lineTo(wid / 2, 0); shape.lineTo(wid / 2, len * 0.72);
-    shape.quadraticCurveTo(wid / 2, len * 0.9, 0, len); shape.quadraticCurveTo(-wid / 2, len * 0.9, -wid / 2, len * 0.72); shape.closePath();
-    const hull = new THREE.ExtrudeGeometry(shape, { depth: wid * 0.35, bevelEnabled: false });
-    hull.rotateX(-Math.PI / 2); hull.translate(0, -0.5, len / 2);
-    g.add(new THREE.Mesh(hull, R() < 0.25 ? hullDark : hullMat));
+    const fb = wid * 0.36;                                       // freeboard aft
+    const hull = new THREE.ExtrudeGeometry(hullShape(len, wid), { depth: fb, bevelEnabled: false, curveSegments: 3 });
+    hull.rotateX(-Math.PI / 2); hull.translate(0, -0.6, len / 2);
+    // sheer line: raise the deck towards the bow (vertices on top, scaled by how far forward)
+    { const pa = hull.attributes.position; for (let i = 0; i < pa.count; i++) { const y = pa.getY(i); if (y > -0.6 + fb * 0.5) { const f = Math.max(0, (len / 2 - pa.getZ(i)) / len); pa.setY(i, y + f * f * fb * 0.55); } } hull.computeVertexNormals(); }
+    const dark = R() < 0.22;
+    g.add(new THREE.Mesh(hull, dark ? hullDark : hullMat));
+    const boot = new THREE.ExtrudeGeometry(hullShape(len * 1.004, wid * 1.012), { depth: 0.32, bevelEnabled: false, curveSegments: 3 });
+    boot.rotateX(-Math.PI / 2); boot.translate(0, -0.18, len / 2 * 1.004);
+    g.add(new THREE.Mesh(boot, bootMat));
+    // teak main deck
+    const deck = new THREE.ExtrudeGeometry(hullShape(len, wid, 0.35), { depth: 0.06, bevelEnabled: false, curveSegments: 2 });
+    deck.rotateX(-Math.PI / 2); deck.translate(0, fb - 0.6 + 0.01, len / 2);
+    g.add(new THREE.Mesh(deck, deckMat));
+    // swim platform at the stern
+    { const sp = new THREE.Mesh(new THREE.BoxGeometry(wid * 0.84, 0.18, 1.6), deckMat); sp.position.set(0, 0.35, len / 2 + 0.8); g.add(sp); }
+    // superstructure: each deck shorter and set further forward, a glass band all round
+    let y = fb - 0.6, top = y;
     for (let i = 0; i < decks; i++) {
-      const dl = len * (0.55 - i * 0.12), dw = wid * (0.8 - i * 0.1);
-      const d = new THREE.Mesh(new THREE.BoxGeometry(dw, 2.2, dl), hullMat);
-      d.position.set(0, wid * 0.35 + 0.6 + i * 2.3, -len * 0.05 + i * 1.5);
-      g.add(d);
-      const band = new THREE.Mesh(new THREE.BoxGeometry(dw + 0.05, 0.8, dl * 0.92), deckMat);
-      band.position.copy(d.position); band.position.y += 0.2;
-      g.add(band);
+      const dl = len * (0.56 - i * 0.12), dw = wid * (0.82 - i * 0.1), dh = 2.5;
+      const zc = len * 0.02 - i * 1.2;
+      const d = new THREE.ExtrudeGeometry(hullShape(dl, dw), { depth: dh, bevelEnabled: false, curveSegments: 2 });
+      d.rotateX(-Math.PI / 2); d.translate(0, y, zc + dl / 2);
+      g.add(new THREE.Mesh(d, hullMat));
+      const band = new THREE.ExtrudeGeometry(hullShape(dl * 1.01, dw * 1.02), { depth: 1.05, bevelEnabled: false, curveSegments: 2 });
+      band.rotateX(-Math.PI / 2); band.translate(0, y + 0.95, zc + dl * 1.01 / 2);
+      g.add(new THREE.Mesh(band, glassBand));
+      // overhanging deck slab (the next deck's floor) with its shadowed edge
+      const slab = new THREE.ExtrudeGeometry(hullShape(dl * 1.06, dw * 1.04), { depth: 0.22, bevelEnabled: false, curveSegments: 2 });
+      slab.rotateX(-Math.PI / 2); slab.translate(0, y + dh, zc + dl * 1.06 / 2 + 0.3);
+      g.add(new THREE.Mesh(slab, hullMat));
+      y += dh + 0.22; top = y;
     }
+    // flybridge: radar arch and a dome, a short mast
+    { const zc = -len * 0.06;
+      const arch = new THREE.Mesh(new THREE.BoxGeometry(wid * 0.5, 1.6, 0.5), hullMat); arch.position.set(0, top + 0.8, zc); g.add(arch);
+      const dome = new THREE.Mesh(new THREE.SphereGeometry(0.45, 10, 6), steelMat); dome.position.set(0, top + 1.9, zc); g.add(dome);
+      const mast = new THREE.Mesh(new THREE.BoxGeometry(0.12, 2.4, 0.12), steelMat); mast.position.set(wid * 0.18, top + 2.6, zc); g.add(mast); }
     return g;
   };
   const nY = lo ? 14 : hi ? 46 : 28;

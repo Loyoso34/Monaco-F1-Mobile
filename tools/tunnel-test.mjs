@@ -42,7 +42,7 @@ let series;
     let last = performance.now();
     const tick = () => {
       const now = performance.now();
-      rows.push({ t: now, s: a.veh.s, into: T.deltaS(T.tunnelS[0], a.veh.s), toExit: T.deltaS(a.veh.s, t1), v: a.veh.speed, daylight: a.daylight, exposure: a.renderer.toneMappingExposure, sun: a.sun.intensity, hemi: a.hemi.intensity, env: a.scene.environmentIntensity });
+      rows.push({ t: now, s: a.veh.s, into: T.deltaS(T.tunnelS[0], a.veh.s), toExit: T.deltaS(a.veh.s, t1), v: a.veh.speed, daylight: a.daylight, exposure: a.renderer.toneMappingExposure, sun: a.M.lighting.CAR_SUN.value, hemi: a.hemi.intensity, env: a.scene.environmentIntensity });
       last = now;
       if (T.deltaS(t1, a.veh.s) > 140 || rows.length > 6000) resolve(rows); else requestAnimationFrame(tick);
     };
@@ -73,7 +73,7 @@ const summary = {
   exposureOutside: +series[0].exposure.toFixed(3),
   exposureInsideMean: inside.length ? +(inside.reduce((a, r) => a + r.exposure, 0) / inside.length).toFixed(3) : null,
   daylightInsideMax: inside.length ? +Math.max(...inside.map(r => r.daylight)).toFixed(3) : null,
-  sunInsideMax: inside.length ? +Math.max(...inside.map(r => r.sun)).toFixed(3) : null,
+  carSunInsideMax: inside.length ? +Math.max(...inside.map(r => r.sun)).toFixed(3) : null,   // sunlight on the car (1 = full)
   maxExposureStepPerFrame: +maxStep.toFixed(4),
   maxExposureRatePerS: +maxRate.toFixed(3),
   entryAdaptationS: adapted && tEntry ? +((adapted.t - tEntry) / 1000).toFixed(2) : null,

@@ -1268,6 +1268,39 @@ export function createCar({ quality = 'high', debugColors = false } = {}) {
     if (g) g.traverse((o) => o.layers.set(1));
   }
 
+  // contact shadow on the road: a soft dark footprint under the floor and denser patches under
+  // the four tyres (unlit, always present: the car stays grounded in building shade, in the
+  // tunnel and where the sun's shadow map does not reach)
+  {
+    const z0 = Z.FA - 1.05, z1 = Z.RA + 0.8, len = z1 - z0, wid = 2.4, NX = 96, NZ = 224;
+    const cv = document.createElement('canvas'); cv.width = NX; cv.height = NZ;
+    const cx = cv.getContext('2d'), img = cx.createImageData(NX, NZ);
+    const sm = (e0, e1, v) => { const t = Math.max(0, Math.min(1, (v - e0) / (e1 - e0))); return t * t * (3 - 2 * t); };
+    // soft rounded box: 1 inside, falling to 0 over `soft` metres outside
+    const box = (x, z, hx, z0b, z1b, rr, soft) => {
+      const zc = (z0b + z1b) / 2, hz = (z1b - z0b) / 2;
+      const qx = Math.abs(x) - hx + rr, qz = Math.abs(z - zc) - hz + rr;
+      const d = Math.hypot(Math.max(qx, 0), Math.max(qz, 0)) + Math.min(Math.max(qx, qz), 0) - rr;
+      return 1 - sm(-soft * 0.35, soft, d);
+    };
+    for (let j = 0; j < NZ; j++) for (let i = 0; i < NX; i++) {
+      const x = ((i + 0.5) / NX - 0.5) * wid, z = z0 + (j + 0.5) / NZ * len;
+      let a = 0.46 * box(x, z, 0.70, Z.FA + 0.30, Z.RA + 0.05, 0.3, 0.42);          // floor
+      a = Math.max(a, 0.22 * box(x, z, 0.95, Z.FA - 0.98, Z.FA - 0.55, 0.15, 0.25));  // front wing
+      for (const W of WHEELS) a = Math.max(a, 0.78 * box(x - W.x, z - W.z, W.w / 2 - 0.02, -0.30, 0.30, 0.12, 0.16));
+      const k = (j * NX + i) * 4;
+      img.data[k] = img.data[k + 1] = img.data[k + 2] = 0; img.data[k + 3] = Math.round(255 * Math.min(0.9, a));
+    }
+    cx.putImageData(img, 0, 0);
+    const t = new THREE.CanvasTexture(cv);
+    const g = new THREE.PlaneGeometry(wid, len); g.rotateX(-Math.PI / 2);
+    const m = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ map: t, transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -8 }));
+    // canvas row 0 (v = 1) lands at -z after the rotation: the front (z0), as drawn
+    m.position.set(0, 0.012, (z0 + z1) / 2);
+    m.name = 'contactShadow'; m.renderOrder = 3; m.castShadow = false; m.receiveShadow = false;
+    root.add(m);
+  }
+
   update({});
   return {
     root, chassis, parts, wheels, materials: M, textures: tex, tcamPod,

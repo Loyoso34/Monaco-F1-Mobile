@@ -36,6 +36,12 @@ export function makeFacadeAtlas() {
   const cv = document.createElement('canvas'); cv.width = TW; cv.height = TH;
   const x = cv.getContext('2d');
   const R = rng(7);
+  // recess mask in the same layout (white = wall face, black = window / door opening set back
+  // into the wall): the facade shader offsets the openings by the view angle (js/scenery.js), so
+  // windows sit in real reveals that shift as the car drives past
+  const mc = document.createElement('canvas'); mc.width = TW; mc.height = TH;
+  const mx = mc.getContext('2d'); mx.fillStyle = '#fff'; mx.fillRect(0, 0, TW, TH);
+  const recess = (rx, ry, rw, rh, depth = 1) => { const v = Math.round(255 * (1 - depth) * 0.45); mx.fillStyle = `rgb(${v},${v},${v})`; mx.fillRect(rx, ry, rw, rh); };
   const rowY = (r) => r * RH;
   const wall = (r, tone = '#f4f1ea') => { x.fillStyle = tone; x.fillRect(0, rowY(r), TW, RH); };
   // subtle plaster / stone noise over a row
@@ -54,6 +60,7 @@ export function makeFacadeAtlas() {
   };
   // a window opening with depth: reveal shade (top + left), glass, frame, sill
   const windowAt = (wx, wy, ww, wh, { frame = '#e8e4da', sill = true, mullion = true, dark = 0, shade = 0.55 } = {}) => {
+    recess(wx + 1, wy + 1, ww - 2, wh - 1);
     x.fillStyle = `rgba(30,26,22,${shade})`; x.fillRect(wx - 2, wy - 2, ww + 4, wh + 4);
     glass(wx + 4, wy + 6, ww - 6, wh - 8, dark);
     x.fillStyle = 'rgba(0,0,0,0.38)'; x.fillRect(wx + 2, wy + 2, ww - 2, 6); x.fillRect(wx + 2, wy + 2, 4, wh - 2);   // reveal shadow
@@ -105,7 +112,7 @@ export function makeFacadeAtlas() {
       const col = (i + mode) % 3 === 0 ? '#5f7a52' : (i + mode) % 3 === 1 ? '#7d6a4f' : '#6c8a6a';
       const open = mode === 0 ? i % 3 !== 2 : i % 2 === 0;
       if (open) { windowAt(ox + 42, oy + 20, 44, 80); shutters(ox + 42, oy + 20, 44, 80, col, true); }
-      else { x.fillStyle = 'rgba(30,26,22,0.45)'; x.fillRect(ox + 40, oy + 18, 48, 84); shutters(ox + 42, oy + 20, 44, 80, col, false); x.fillStyle = '#fbf8f1'; x.fillRect(ox + 36, oy + 100, 56, 6); }
+      else { recess(ox + 41, oy + 19, 46, 82, 0.5); x.fillStyle = 'rgba(30,26,22,0.45)'; x.fillRect(ox + 40, oy + 18, 48, 84); shutters(ox + 42, oy + 20, 44, 80, col, false); x.fillStyle = '#fbf8f1'; x.fillRect(ox + 36, oy + 100, 56, 6); }
       if (mode === 1 && i % 2 === 0) railing(ox + 36, oy + 80, 56, 20);
     }
   }
@@ -114,6 +121,7 @@ export function makeFacadeAtlas() {
   for (let i = 0; i < BAYS; i++) {
     const ox = bay(i), oy = rowY(ROW.modern);
     x.fillStyle = 'rgba(25,25,28,0.55)'; x.fillRect(ox + 4, oy + 8, B - 8, 96);
+    recess(ox + 5, oy + 9, B - 10, 87);
     glass(ox + 8, oy + 12, B - 16, 86, 10);
     x.fillStyle = '#d8d8d4'; for (let k = 8; k < B - 4; k += 30) x.fillRect(ox + k, oy + 12, 3, 86);
     x.fillStyle = 'rgba(0,0,0,0.30)'; x.fillRect(ox + 8, oy + 12, B - 16, 10);       // slab shade above
@@ -124,7 +132,7 @@ export function makeFacadeAtlas() {
   wall(ROW.tower, '#ecebe6');
   for (let i = 0; i < BAYS; i++) {
     const ox = bay(i), oy = rowY(ROW.tower);
-    glass(ox, oy + 30, B, 62, 20);
+    glass(ox, oy + 30, B, 62, 20); recess(ox, oy + 31, B, 60, 0.45);
     x.fillStyle = '#cfd0cc'; for (let k = 0; k < B; k += 32) x.fillRect(ox + k, oy + 30, 4, 62);
     x.fillStyle = 'rgba(0,0,0,0.25)'; x.fillRect(ox, oy + 30, B, 6);
   }
@@ -139,7 +147,7 @@ export function makeFacadeAtlas() {
   wall(ROW.hotel, '#f7f7f5');
   for (let i = 0; i < BAYS; i++) {
     const ox = bay(i), oy = rowY(ROW.hotel);
-    glass(ox, oy + 16, B, 84, 30);
+    glass(ox, oy + 16, B, 84, 30); recess(ox, oy + 17, B, 82, 0.45);
     x.fillStyle = '#e6e6e2'; for (let k = 0; k < B; k += 21) x.fillRect(ox + k, oy + 16, 2, 84);
     x.fillStyle = 'rgba(0,0,0,0.35)'; x.fillRect(ox, oy + 16, B, 8);
   }
@@ -151,6 +159,7 @@ export function makeFacadeAtlas() {
     x.fillStyle = fascia; x.fillRect(ox + 6, oy + 10, B - 12, 20);
     x.fillStyle = 'rgba(255,255,255,0.75)'; for (let k = 0; k < 5; k++) x.fillRect(ox + 20 + k * 18, oy + 17, 10, 6);
     x.fillStyle = '#1c1c1e'; x.fillRect(ox + 6, oy + 32, B - 12, 92);
+    recess(ox + 8, oy + 34, B - 16, 94, 0.8);
     glass(ox + 10, oy + 36, B - 20, 86, -30);
     // warm interior and goods
     x.fillStyle = 'rgba(255,220,170,0.25)'; x.fillRect(ox + 12, oy + 70, B - 24, 50);
@@ -163,6 +172,7 @@ export function makeFacadeAtlas() {
   for (let i = 0; i < BAYS; i++) {
     const ox = bay(i), oy = rowY(ROW.belleBase);
     x.fillStyle = '#1e1c1a'; x.beginPath(); x.moveTo(ox + 24, oy + 128); x.lineTo(ox + 24, oy + 52); x.arc(ox + 64, oy + 52, 40, Math.PI, 0); x.lineTo(ox + 104, oy + 128); x.closePath(); x.fill();
+    mx.fillStyle = '#000'; mx.beginPath(); mx.moveTo(ox + 26, oy + 128); mx.lineTo(ox + 26, oy + 52); mx.arc(ox + 64, oy + 52, 38, Math.PI, 0); mx.lineTo(ox + 102, oy + 128); mx.closePath(); mx.fill();
     glass(ox + 30, oy + 40, 68, 88, -20);
     x.strokeStyle = '#3a3026'; x.lineWidth = 3; x.beginPath(); x.moveTo(ox + 64, oy + 14); x.lineTo(ox + 64, oy + 128); x.stroke();
     x.fillStyle = '#e2d6bd'; x.fillRect(ox + 58, oy + 8, 12, 12);        // keystone
@@ -172,6 +182,7 @@ export function makeFacadeAtlas() {
   for (let i = 0; i < BAYS; i++) {
     const ox = bay(i), oy = rowY(ROW.cafe);
     x.fillStyle = '#1d1b1a'; x.fillRect(ox + 6, oy + 26, B - 12, 102);
+    recess(ox + 8, oy + 28, B - 16, 100, 0.8);
     glass(ox + 10, oy + 30, B - 20, 98, -10);
     x.fillStyle = 'rgba(255,210,150,0.30)'; x.fillRect(ox + 10, oy + 70, B - 20, 58);
     x.fillStyle = i % 2 ? '#7a1f24' : '#1f4a3a'; x.fillRect(ox, oy, B, 24);
@@ -207,7 +218,52 @@ export function makeFacadeAtlas() {
   tex.wrapS = THREE.RepeatWrapping; tex.wrapT = THREE.ClampToEdgeWrapping;
   tex.anisotropy = 8; tex.generateMipmaps = true;
   tex.minFilter = THREE.LinearMipmapLinearFilter;
+  const rt = new THREE.CanvasTexture(mc);
+  rt.wrapS = THREE.RepeatWrapping; rt.wrapT = THREE.ClampToEdgeWrapping; rt.anisotropy = 4;
+  tex.userData.recess = rt;
   return tex;
+}
+
+// Facade shader: window and door openings (recess mask) are set back into the wall. Per pixel,
+// a ray from the eye is carried to the depth of the opening (tangent frame from screen-space
+// derivatives, no extra vertex data); where it lands inside the opening the glass is drawn there
+// (it slides with the view angle), where it lands on wall it is looking at the reveal - drawn in
+// shade. Two extra texture reads, only on opening pixels.
+export function addFacadeRecess(material, recessMap, depth = 0.24) {
+  const prev = material.onBeforeCompile;
+  material.onBeforeCompile = (sh, r) => {
+    if (prev) prev.call(material, sh, r);
+    sh.uniforms.recessMap = { value: recessMap };
+    sh.fragmentShader = sh.fragmentShader
+      .replace('void main() {', 'uniform sampler2D recessMap;\nvoid main() {')
+      .replace('#include <map_fragment>', `#include <map_fragment>
+      {
+        float m0 = texture2D(recessMap, vMapUv).r;
+        if (m0 < 0.6) {
+          vec3 p = -vViewPosition;
+          vec3 dp1 = dFdx(p), dp2 = dFdy(p);
+          vec2 duv1 = dFdx(vMapUv), duv2 = dFdy(vMapUv);
+          vec3 N = normalize(cross(dp1, dp2));
+          if (dot(N, p) > 0.0) N = -N;
+          vec3 dp2perp = cross(dp2, N), dp1perp = cross(N, dp1);
+          vec3 Tg = dp2perp * duv1.x + dp1perp * duv2.x;
+          vec3 Bg = dp2perp * duv1.y + dp1perp * duv2.y;
+          float det = dot(dp1, dp2perp);
+          vec3 V = normalize(p);
+          float cosA = max(dot(V, -N), 0.3);
+          float d = ${depth.toFixed(3)} * (1.0 - m0 / 0.45 * 0.55);
+          vec3 dP = V * (d / cosA);
+          dP -= dot(dP, N) * N;
+          vec2 uv2 = vMapUv + vec2(dot(dP, Tg), dot(dP, Bg)) / det;
+          float m2 = texture2D(recessMap, uv2).r;
+          vec4 c2 = texture2D(map, uv2);
+          diffuseColor.rgb = m2 < 0.6 ? c2.rgb : diffuseColor.rgb * 0.42;
+        }
+      }`);
+  };
+  const key = material.customProgramCacheKey ? material.customProgramCacheKey.bind(material) : null;
+  material.customProgramCacheKey = () => (key ? key() : '') + '|recess';
+  material.needsUpdate = true;
 }
 // v range of a row (canvas row 0 is the top of the texture: v near 1), inset against mip bleed
 // render layer of the near-only architectural detail (main camera only: not the mirrors or the
@@ -238,6 +294,12 @@ export class CityBuilder {
     bk.pos.push(...a, ...b, ...c, ...b, ...d, ...c);
     bk.uv.push(u0, v0, u1, v0, u0, v1, u1, v0, u1, v1, u0, v1);
     for (let k = 0; k < 6; k++) bk.col.push(col.r * f, col.g * f, col.b * f);
+  }
+  // quad with a vertical gradient: f0 along the bottom edge (a, b), f1 along the top (c, d)
+  quadV(bk, a, b, c, d, u0, u1, v0, v1, col, f0, f1) {
+    bk.pos.push(...a, ...b, ...c, ...b, ...d, ...c);
+    bk.uv.push(u0, v0, u1, v0, u0, v1, u1, v0, u1, v1, u0, v1);
+    for (const f of [f0, f0, f1, f0, f1, f1]) bk.col.push(col.r * f, col.g * f, col.b * f);
   }
   // general triangle
   tri(bk, a, b, c, uva, uvb, uvc, col, f = 1) {
@@ -299,12 +361,15 @@ export class CityBuilder {
       const isFront = f.k === b.front;
       // ground floor
       {
-        const [A, Bp] = p(y0), [Cc, D] = p(y0 + gH);
         const row = isFront || (b.near && R() < 0.5) ? groundRow : (st === 'belle' ? ROW.belleBase : upRow);
         const [v0, v1] = vRow(row);
         // the visible part of a ground floor taller than the strip is the strip stretched: use
-        // the full row for gH (shop / base rows are drawn for a tall storey)
-        this.quad(bk, A, Bp, Cc, D, uOff, u1, v0, v1, col, 0.97);
+        // the full row for gH (shop / base rows are drawn for a tall storey). The foot of the
+        // wall darkens into the pavement (contact shadow / grime) over the first 1.1 m.
+        const hA = 1.1, vm = v0 + (v1 - v0) * hA / gH;
+        const [A, Bp] = p(y0), [M0, M1] = p(y0 + hA), [Cc, D] = p(y0 + gH);
+        this.quadV(bk, A, Bp, M0, M1, uOff, u1, v0, vm, col, 0.5, 0.92);
+        this.quadV(bk, M0, M1, Cc, D, uOff, u1, vm, v1, col, 0.92, 0.97);
       }
       // upper floors (the top one is the attic strip on belle epoque buildings)
       for (let j = 0; j < nUp; j++) {

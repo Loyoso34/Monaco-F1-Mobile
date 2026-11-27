@@ -1,5 +1,83 @@
 # Testing report
 
+## 2026 visual overhaul: what was tested, and how
+
+Same environment as below: a cloud container **without a phone and without a GPU** - Chromium
+(Playwright) emulating an iPhone (iPhone 15 Pro Max user agent, 956 × 440 CSS px landscape -
+the Pro Max class size - touch) on software WebGL (SwiftShader). **No iPhone, no Safari /
+WebKit, no GPU**: no frame rate in this report comes from a phone.
+
+**How it was reviewed.** The test driver lapped Monaco at racing speed through the normal entry
+point (`?start=drive`) and the game was captured from the driver's eye on the approach to 15
+corners, two frames 0.25 s apart at each (what moves, shimmers or pops), plus five T-cam stops
+and every menu screen (`tools/onboard.mjs`). The same stops were captured before any change
+and again at the end.
+
+**What the first pass found** (and what was done):
+
+| Problem seen at phone size, in motion | Fix |
+|---|---|
+| The pedal pads covered the right mirror, the steering box crowded the left one | controls lowered into the corners (pedals 14 px from the foot), mirrors and the wheel display clear with both thumbs down; steering zone lights while touched |
+| Catch fences a coarse 22 cm lattice that shimmered | 50 mm chain link with mipmapped coverage (a still veil far away, wires up close), painted posts every 4 m, top panel leaning over the track |
+| Armco flat strips, barriers floating on the road | triple W-beam relief geometry with bolts, grime and tyre rubbing; contact shadows at every barrier foot and building base; soft contact shadow under the car |
+| Tunnel an over-exposed white box with small light dashes | dim painted concrete, dark ceiling, glaring luminaire rows reflected on the road, ~1.75x camera exposure inside so the exit blows out |
+| Grandstands full of a crowd texture | kept empty: terraces, red seat rows, aisles, railings |
+| Facades flat at speed, windows painted on | windows / shopfronts / arches set back in the walls by a parallax facade shader |
+| Yachts plain boxes | motor yachts with sheer, boot stripe, glass decks, flybridge, swim platform |
+| Banners named after the corners (a TABAC board at Casino) | generic sponsor sets that change every 96 m |
+| Generic UI; T-cam default | one motorsport identity (loading key art rendered from the game, menus, timing tower, controls); the driver's eye is the default camera |
+
+**Results after the overhaul** (same environment):
+
+| Test | Result |
+|---|---|
+| Acceptance checks (`tools/gameplay-test.mjs out iphone`) | **43 / 43** pass through the normal entry point: cockpit default, steering direction (input -> wheel -> front wheels -> car, 4.4 : 1), steering zone size and placement, edge gaps (steer 18 px, pedals 22 px, 14 px from the foot), throttle -> brake slide, progressive brake, zero-steer drift, automatic up- and downshifts, lap timing and invalidation, damage, both mirrors live, no page errors; cold launch 2.6 s (emulated) |
+| Circuit inspection (`tools/inspect-circuit.mjs`) | **all checks pass on High, Medium and Low**: 0 scenery points in the drivable volume (the leaning fence tops, yachts and grandstands included), 0 buildings on pavements, 0 overlapping footprints of 608, 0 floating bases of 552 |
+| Braking / traction (`tools/handling-test.mjs`), straight line (`tools/straight-line-test.mjs`) | **9 / 9**; all pass (no physics changes) |
+| Lap check at racing speed (`tools/lap-check.mjs`) | **12 / 12**: both mirrors live and varied at 64-271 km/h in sun, shade and the tunnel |
+| Halo markings shimmer (`tools/decal-shimmer-test.mjs`) | **4 / 4**: at or below the 16x supersampled ideal (sun / shade / tunnel, cockpit and T-cam) |
+| Materials in every light (`tools/material-check.mjs`) | **all pairs distinguishable**. The previous build already failed one pair - tyre rubber / halo on the shaded side, Delta-E 2.6 (threshold 3) - fixed with a fuller satin sheen on the halo: 3.4. Tunnel pairs now 9.6-18.1 (previous build 6.3-14.1) |
+| Tunnel transitions (`tools/tunnel-test.mjs out cockpit`) | exposure 1.00 outside -> 2.38 mean inside; sunlight on the car inside <= 3 %; entry 95 % adapted 1.8 s after the portal; exit peak 1.99 at the portal, within 2 % of daylight 1.2 s later; largest change 0.05 per frame (a smooth fade, no steps); 0 non-finite values |
+| Car in street shade (onboard frames, chassis top in front of the wheel, sRGB) | La Rascasse 21,22,29 -> 26,34,58; Swimming Pool exit 2,2,6 -> 13,23,48 (a quarter of the sun kept as the light bounced off the sun-lit facades and road) |
+
+Before / after, same stops, phone landscape size (956 x 440), driver's eye at racing speed:
+
+![Sainte Devote, Beau Rivage, Casino Square, the hairpin](img/overhaul-onboard-1.webp)
+![Tunnel, tunnel exit, Nouvelle Chicane, Tabac](img/overhaul-onboard-2.webp)
+![Swimming Pool in / out, La Rascasse, Anthony Noghes](img/overhaul-onboard-3.webp)
+![T-cam: Casino, hairpin, tunnel, Swimming Pool](img/overhaul-tcam.webp)
+![Loading, menu, settings, pause](img/overhaul-ui.webp)
+
+### Performance (measured here; no phone, no GPU)
+
+**No frame rate was measured on an iPhone** - there is none in this environment, and the
+software renderer here says nothing about a phone GPU. What was measured is the work per frame:
+every render pass summed (main view, sun shadow, both mirrors, the car's reflection-cube face,
+PMREM filtering), High tier, 956 x 440, at twelve points round the lap with the car at racing
+speed (`perfall` probe: `renderer.render` wrapped, 12 frames averaged per point). Previous build
+= `cbd9b77`, same probe:
+
+| Per frame | Previous build | After the overhaul |
+|---|---|---|
+| Draw calls, cockpit (default) | 217-333, average 276 | 228-349, average 293 (+6 %) |
+| Triangles, cockpit | 326-469 k, average 408 k | 399-605 k, average 506 k (+24 %) |
+| Draw calls, T-cam | 207-311, average 262 | 214-330, average 278 |
+| Triangles, T-cam | 319-464 k, average 398 k | 390-577 k, average 487 k |
+| Busiest points (cockpit) | start 333 calls / 463 k, Beau Rivage 469 k | start 349 / 585 k, Beau Rivage 605 k, harbour (chicane) 583 k |
+| GPU geometries / textures | 331 / 38 | 342 / 41 |
+
+Where the budget went and what was trimmed: the Armco relief, fences and posts are part of the
+existing per-chunk barrier and fence meshes (no extra draw calls; 2 m segments wherever the
+barrier bends at more than 80 m radius, 1 m in the corners - that halved their triangles, first
+measurement 596 k average); yachts and grandstands merge into one mesh per material (yacht hull
+curves at 3 segments: they are seen from tens of metres); the fence is one alpha-blended pass
+per chunk (no alpha-to-coverage, no second side pass); facade depth is a fragment-shader effect
+on the existing city material (two extra texture reads on window pixels only, no geometry);
+contact shadows and tunnel lighting are baked into vertex colours; the car's contact shadow is
+one quad. Simulation and game logic are unchanged.
+
+
+
 ## 2026 upgrade: what was tested, and how
 
 Same environment as below: a cloud container **without a phone and without a GPU** - Chromium
@@ -170,15 +248,16 @@ Tabac and Rascasse, and the black strip and wall-to-wall advertising in the tunn
 ## Tunnel lighting transitions (`tools/tunnel-test.mjs`)
 
 The autopilot drives Portier → tunnel → Nouvelle Chicane (no rendering, real-time simulation,
-774 frames); then a rendered run captures frames at the entrance, inside and at the exit.
+781 frames); then a rendered run captures frames at the entrance, inside and at the exit
+(`node tools/tunnel-test.mjs out cockpit`).
 
 | Measure | Result |
 |---|---|
-| Exposure outside → inside | 1.00 → 1.31 (the tunnel stays a little darker than daylight) |
-| Daylight on the car inside / sun inside | 0 / ≤ 3 % (the shell's shadow does the rest on High / Medium) |
-| Entry: exposure 95 % adapted | 1.8 s after the portal (66 m in at ~150 km/h) |
-| Exit: peak exposure / settled within 2 % | 1.24 at the portal / 0.75 s after it |
-| Largest exposure change between frames | 0.011 (no visible steps) |
+| Exposure outside → inside | 1.00 → 2.38 mean (the camera opens up; the interior is built dim, so the sun-lit exit and the sky beyond it blow out) |
+| Daylight on the car inside / sunlight on the car inside | 0 / ≤ 3 % (car-only sun factor; the street outside stays sun-lit) |
+| Entry: exposure 95 % adapted | 1.8 s after the portal |
+| Exit: peak exposure / settled within 2 % | 1.99 at the portal / 1.2 s after it |
+| Largest exposure change between frames | 0.05 (a smooth fade; 0 non-finite values) |
 
 ## Visual checks (`tools/views.mjs`, `tools/shots.mjs`, `tools/tour.mjs`)
 
@@ -353,6 +432,13 @@ half float; 32-bit float filtering is not available on every phone), and the mir
 fall back to 8-bit sRGB where the GPU cannot render to half float.
 
 ## Still needs a physical-phone test
+
+* **2026 visual overhaul on a real iPhone (Safari)**: the frame rate in the cockpit view at the
+  harbour (chicane - Tabac - Swimming Pool) and at Beau Rivage, the busiest points measured here
+  (`?bench=1&cam=cockpit`, twice); that the parallax facade shader (screen-space derivatives),
+  the alpha-blended catch fences and the tunnel glare compile and look the same under WebKit /
+  Metal; the touch controls with real thumbs (both mirrors and the wheel display should stay
+  visible); the loading key art on the notch / Dynamic Island side.
 
 * **2026 upgrade on a real iPhone (Safari / Home Screen app)**: the frame rate with the
   architectural city and the live car reflections (`?bench=1&cam=tcam` and `&cam=cockpit`,

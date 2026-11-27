@@ -227,61 +227,172 @@ export function roadDetailAtlas() {
   return t;
 }
 
-// Armco guard-rail (W-beam x2) on posts, 4 m per tile, with occasional sponsor-free ad panels.
-export function armco() {
-  const W = 512, H = 128, c = canvas(W, H), x = c.getContext('2d');
-  x.fillStyle = '#5c6066'; x.fillRect(0, 0, W, H);           // shadowed gap / posts behind
-  for (let p = 0; p < 4; p++) { x.fillStyle = '#3f4247'; x.fillRect(p * 128 + 54, 0, 20, H); }
-  const beam = (y0, h) => {
-    const g = x.createLinearGradient(0, y0, 0, y0 + h);
-    g.addColorStop(0, '#cfd4d9'); g.addColorStop(0.25, '#9aa0a7'); g.addColorStop(0.5, '#dde1e5'); g.addColorStop(0.75, '#8d939a'); g.addColorStop(1, '#c4c9ce');
+// Armco guard-rail: three stacked galvanised W-beams (0.31 m each, 0.10 - 1.03 m above the
+// road) on posts every 2 m, splice bolts every 4 m. One tile = 4 m x 1.10 m (-0.05 .. 1.05 m),
+// 1024 x 128. The geometry gives each rail its lit upper / shaded lower half; the texture adds
+// the W valley, the lips, bolts, spangle, road grime at the foot and black tyre rubbings.
+const ARMCO_Y = (h) => (1.05 - h) / 1.10 * 128;          // height (m) -> texel row
+export function armco(seed = 41, { dirt = 1 } = {}) {
+  const W = 1024, H = 128, c = canvas(W, H), x = c.getContext('2d'), r = rng(seed);
+  // ground gap under the rails: posts and their shadow
+  x.fillStyle = '#2c2f33'; x.fillRect(0, 0, W, H);
+  for (let p = 0; p < 2; p++) { x.fillStyle = '#4a4e54'; x.fillRect(p * 512 + 241, 0, 30, H); x.fillStyle = '#383b40'; x.fillRect(p * 512 + 241, 0, 6, H); }
+  for (let i = 0; i < 3; i++) {
+    const y0 = ARMCO_Y(0.41 + 0.31 * i), y1 = ARMCO_Y(0.10 + 0.31 * i), h = y1 - y0;
+    // W profile across the rail: lip, upper ridge, valley, lower ridge, lip
+    const g = x.createLinearGradient(0, y0, 0, y1);
+    g.addColorStop(0.00, '#8d9399'); g.addColorStop(0.05, '#dfe3e6'); g.addColorStop(0.16, '#eef0f1');
+    g.addColorStop(0.36, '#a9afb5'); g.addColorStop(0.48, '#7b8187'); g.addColorStop(0.56, '#c9ced2');
+    g.addColorStop(0.70, '#d6dadd'); g.addColorStop(0.88, '#8f959b'); g.addColorStop(0.96, '#6d7378'); g.addColorStop(1.00, '#3a3d41');
     x.fillStyle = g; x.fillRect(0, y0, W, h);
-    x.fillStyle = 'rgba(0,0,0,0.25)';
-    for (let p = 0; p < 8; p++) x.fillRect(p * 64 + 30, y0 + h * 0.45, 4, 4);
-  };
-  beam(14, 40); beam(70, 40);
-  x.fillStyle = 'rgba(80,60,40,0.15)'; x.fillRect(0, 112, W, 16);
-  return tex(c);
+    // galvanised spangle: soft lighter / darker flakes
+    for (let k = 0; k < 900; k++) {
+      const v = r() < 0.5 ? 255 : 60;
+      x.fillStyle = `rgba(${v},${v},${v},${0.025 + r() * 0.05})`;
+      x.fillRect(r() * W, y0 + r() * h, 3 + r() * 14, 1 + r() * 3);
+    }
+    // splice (overlap of two rail lengths) every 4 m: a darker edge and two rows of bolts
+    x.fillStyle = 'rgba(0,0,0,0.30)'; x.fillRect(0, y0, 3, h); x.fillRect(W - 2, y0, 2, h);
+    for (const bx of [10, 24, 38, W - 30, W - 16]) for (const fy of [0.22, 0.74]) bolt(x, bx, y0 + h * fy, 2.6);
+    // post bolt every 2 m (in the valley)
+    for (const px of [256, 768]) bolt(x, px, y0 + h * 0.5, 3.0);
+  }
+  // road grime splashed up the foot of the barrier, black tyre rubbing along the lower rails
+  const grime = x.createLinearGradient(0, ARMCO_Y(0.55), 0, ARMCO_Y(0.0));
+  grime.addColorStop(0, 'rgba(70,62,52,0)'); grime.addColorStop(1, `rgba(70,62,52,${0.42 * dirt})`);
+  x.fillStyle = grime; x.fillRect(0, ARMCO_Y(0.55), W, ARMCO_Y(0.0) - ARMCO_Y(0.55));
+  for (let k = 0; k < 7 * dirt; k++) {
+    const yy = ARMCO_Y(0.18 + r() * 0.4), len = 40 + r() * 260, x0 = r() * (W - len);
+    for (let j = 0; j < 14; j++) {
+      x.fillStyle = `rgba(14,14,16,${0.05 + r() * 0.14})`;
+      x.fillRect(x0 + r() * len * 0.3, yy + (r() - 0.5) * 7, len * (0.4 + r() * 0.6), 1 + r() * 2.5);
+    }
+  }
+  return tex(c, { aniso: 8 });
+}
+function bolt(x, cx, cy, rad) {
+  x.fillStyle = 'rgba(30,32,35,0.85)'; x.beginPath(); x.arc(cx, cy, rad, 0, Math.PI * 2); x.fill();
+  x.fillStyle = 'rgba(240,242,244,0.55)'; x.beginPath(); x.arc(cx - rad * 0.3, cy - rad * 0.35, rad * 0.45, 0, Math.PI * 2); x.fill();
 }
 
-// Concrete wall with advertising panels (generic names) for street sections and the tunnel.
-export function adWall() {
+// Advertising banners stretched over the barriers (generic names, no real brands). One tile =
+// 16 m x 1.10 m = four 4 m panels on a 1024 x 128 canvas: the artwork is drawn 0.55x wide so
+// it keeps its proportions on the 4 m x 1.1 m panel (64 px/m along, 116 px/m up).
+const AD_SETS = [
+  [['#0b2a5b', '#ffffff', 'MONTE-CARLO', 'bar'], ['#ffffff', '#c8102e', 'GRAND PRIX', 'chev'], ['#c8102e', '#ffffff', 'RIVIERA', 'dot'], ['#101010', '#ffc20e', 'HERCULE MARINE', 'bar']],
+  [['#00704a', '#ffffff', 'AZUR', 'dot'], ['#f2f2f2', '#0b2a5b', 'PRINCIPAUTÉ', 'bar'], ['#202a44', '#ffffff', 'NOVA', 'chev'], ['#ffc20e', '#101010', 'SOLARIS', 'dot']],
+  [['#e10b2a', '#ffffff', 'VELOCE', 'chev'], ['#111418', '#ffffff', 'CORSA', 'bar'], ['#ffffff', '#00704a', 'AZURA', 'dot'], ['#0b2a5b', '#ffc20e', 'MONACO 2024', 'chev']],
+];
+export function adWall(set = 0) {
   const W = 1024, H = 128, c = canvas(W, H), x = c.getContext('2d');
-  const ads = [
-    ['#0b2a5b', '#ffffff', 'MONTE-CARLO'], ['#ffffff', '#c8102e', 'GRAND PRIX'], ['#c8102e', '#ffffff', 'RIVIERA'],
-    ['#101010', '#ffc20e', 'PORT HERCULE'], ['#00704a', '#ffffff', 'HARBOUR'], ['#f2f2f2', '#0b2a5b', 'PRINCIPAUTÉ'],
-    ['#202a44', '#ffffff', 'CASINO'], ['#ffc20e', '#101010', 'TABAC'],
-  ];
-  const w = W / 4;
+  const ads = AD_SETS[set % AD_SETS.length];
+  const w = W / 4, top = ARMCO_Y(1.03), bot = ARMCO_Y(0.06);
+  x.fillStyle = '#2c2f33'; x.fillRect(0, 0, W, H);                 // gap under the banner
   for (let i = 0; i < 4; i++) {
-    const [bg, fg, t] = ads[(i * 3 + 1) % ads.length];
-    x.fillStyle = bg; x.fillRect(i * w, 0, w, H);
-    x.fillStyle = fg; x.font = '900 46px Arial Black, Arial, sans-serif'; x.textAlign = 'center'; x.textBaseline = 'middle';
-    x.save(); x.translate(i * w + w / 2, H / 2 + 4); x.scale(Math.min(1, (w - 20) / x.measureText(t).width), 1); x.fillText(t, 0, 0); x.restore();
-    x.fillStyle = 'rgba(0,0,0,0.25)'; x.fillRect(i * w + w - 3, 0, 3, H);
+    const [bg, fg, t, mark] = ads[i];
+    const x0 = i * w;
+    x.fillStyle = bg; x.fillRect(x0, top, w, bot - top);
+    // a simple graphic device beside the name (stripes / chevron / disc)
+    x.save(); x.translate(x0 + w / 2, (top + bot) / 2); x.scale(0.55, 1);
+    x.fillStyle = fg;
+    let tw;
+    x.font = 'italic 900 58px "Helvetica Neue", "Arial Black", Arial, sans-serif'; x.textAlign = 'center'; x.textBaseline = 'middle';
+    tw = Math.min(x.measureText(t).width, (w - 40) / 0.55 - 70);
+    const k = tw / x.measureText(t).width;
+    if (mark === 'bar') { x.fillRect(-tw / 2 - 52, -22, 12, 44); x.fillRect(-tw / 2 - 34, -22, 12, 44); }
+    else if (mark === 'chev') { x.beginPath(); x.moveTo(-tw / 2 - 58, -24); x.lineTo(-tw / 2 - 30, 0); x.lineTo(-tw / 2 - 58, 24); x.lineTo(-tw / 2 - 44, 24); x.lineTo(-tw / 2 - 16, 0); x.lineTo(-tw / 2 - 44, -24); x.closePath(); x.fill(); }
+    else { x.beginPath(); x.arc(-tw / 2 - 36, 0, 18, 0, Math.PI * 2); x.fill(); }
+    x.save(); x.translate(14, 4); x.scale(k, 1); x.fillText(t, 0, 0); x.restore();
+    x.restore();
+    // banner hem and the eyelets that tie it to the rails
+    x.fillStyle = 'rgba(0,0,0,0.22)'; x.fillRect(x0, top, w, 2); x.fillRect(x0, bot - 2, w, 2); x.fillRect(x0 + w - 2, top, 2, bot - top);
+    for (let e = 8; e < w; e += 32) { x.fillStyle = 'rgba(210,212,215,0.9)'; x.fillRect(x0 + e, top + 3, 2, 2); x.fillRect(x0 + e, bot - 5, 2, 2); }
   }
+  // dirt at the foot
+  const grime = x.createLinearGradient(0, ARMCO_Y(0.4), 0, bot);
+  grime.addColorStop(0, 'rgba(60,55,48,0)'); grime.addColorStop(1, 'rgba(60,55,48,0.30)');
+  x.fillStyle = grime; x.fillRect(0, ARMCO_Y(0.4), W, bot - ARMCO_Y(0.4));
   return tex(c);
 }
 
+// Tecpro-style energy-absorbing blocks: 1 m wide vinyl-covered blocks, alternating colours.
 export function tecpro() {
-  const W = 256, H = 128, c = canvas(W, H), x = c.getContext('2d');
-  for (let i = 0; i < 4; i++) { x.fillStyle = i % 2 ? '#e8edf2' : '#1f5fbf'; x.fillRect(i * 64, 0, 64, H); x.fillStyle = 'rgba(0,0,0,0.25)'; x.fillRect(i * 64, 0, 3, H); }
-  x.fillStyle = 'rgba(255,255,255,0.25)'; x.fillRect(0, 20, W, 6); x.fillRect(0, 100, W, 6);
+  const W = 512, H = 128, c = canvas(W, H), x = c.getContext('2d');
+  for (let i = 0; i < 4; i++) {
+    const g = x.createLinearGradient(0, 0, 0, H);
+    const base = i % 2 ? ['#f1f3f5', '#d3d8dd'] : ['#2466c8', '#184a96'];
+    g.addColorStop(0, base[0]); g.addColorStop(1, base[1]);
+    x.fillStyle = g; x.fillRect(i * 128, 0, 128, H);
+    x.fillStyle = 'rgba(0,0,0,0.35)'; x.fillRect(i * 128, 0, 3, H);
+    x.fillStyle = 'rgba(255,255,255,0.18)'; x.fillRect(i * 128 + 3, 0, 2, H);
+  }
+  x.fillStyle = 'rgba(0,0,0,0.25)'; x.fillRect(0, 22, W, 4); x.fillRect(0, 100, W, 4);
+  const grime = x.createLinearGradient(0, 80, 0, H);
+  grime.addColorStop(0, 'rgba(60,55,48,0)'); grime.addColorStop(1, 'rgba(60,55,48,0.35)');
+  x.fillStyle = grime; x.fillRect(0, 80, W, H - 80);
   return tex(c);
 }
 
-// Debris (catch) fence: chain link with posts, alpha-tested. 4 m per tile, 4 m tall.
-export function fence() {
-  const W = 256, H = 256, c = canvas(W, H), x = c.getContext('2d');
-  x.clearRect(0, 0, W, H);
-  x.strokeStyle = 'rgba(92,98,106,0.85)'; x.lineWidth = 1.1;
-  for (let i = -H; i < W + H; i += 14) {
-    x.beginPath(); x.moveTo(i, 0); x.lineTo(i + H, H); x.stroke();
-    x.beginPath(); x.moveTo(i, H); x.lineTo(i + H, 0); x.stroke();
+// Tunnel wall: painted concrete panels (joints every 1.5 m), a grime band above the rail,
+// water stains running down from the cable tray. Mapped 3 m per 1024 px, 1.05 - 4.6 m up.
+export function tunnelWall() {
+  const W = 1024, H = 128, c = canvas(W, H), x = c.getContext('2d'), r = rng(77);
+  const img = x.createImageData(W, H);
+  for (let i = 0; i < W * H; i++) { const n = 196 + (r() - 0.5) * 18; img.data[i * 4] = n; img.data[i * 4 + 1] = n - 3; img.data[i * 4 + 2] = n - 9; img.data[i * 4 + 3] = 255; }
+  x.putImageData(img, 0, 0);
+  for (let j = 0; j < W; j += 512) { x.fillStyle = 'rgba(40,38,34,0.45)'; x.fillRect(j, 0, 3, H); x.fillStyle = 'rgba(255,255,255,0.15)'; x.fillRect(j + 3, 0, 2, H); }
+  // stains down from the top
+  for (let k = 0; k < 26; k++) {
+    const sx = r() * W, len = 20 + r() * 70, wd = 3 + r() * 14;
+    const g = x.createLinearGradient(0, 0, 0, len);
+    g.addColorStop(0, `rgba(70,64,52,${0.12 + r() * 0.2})`); g.addColorStop(1, 'rgba(70,64,52,0)');
+    x.fillStyle = g; x.fillRect(sx, 0, wd, len);
   }
-  x.fillStyle = 'rgba(70,74,80,1)'; x.fillRect(0, 0, 8, H); x.fillRect(0, 0, W, 5); x.fillRect(0, H * 0.5, W, 3);
-  const t = tex(c, { srgb: true });
+  // grime band at the bottom (above the rail): exhaust soot and tyre dust
+  const g = x.createLinearGradient(0, H * 0.55, 0, H);
+  g.addColorStop(0, 'rgba(40,38,36,0)'); g.addColorStop(1, 'rgba(40,38,36,0.55)');
+  x.fillStyle = g; x.fillRect(0, H * 0.55, W, H * 0.45);
+  return tex(c);
+}
+
+// Debris (catch) fence mesh: galvanised chain link, 50 mm diamonds of ~4 mm wire. One tile =
+// 0.8 m square (16 diamonds across), 256 px. Built as raw RGBA so the colour is the wire's
+// everywhere and the alpha is its coverage: the GPU mipmaps then average to the real
+// see-through density (~20 %), so at a distance the fence becomes a fine grey veil that stays
+// still in motion instead of an aliased lattice.
+export function fence() {
+  const N = 256, cells = 16, pitch = N / cells, half = 0.72;     // wire half-width in texels
+  const data = new Uint8Array(N * N * 4), r = rng(808);
+  for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+    const a = ((x + y + 0.5) % pitch + pitch) % pitch, b = ((x - y + 0.5) % pitch + pitch) % pitch;
+    const da = Math.min(a, pitch - a) / Math.SQRT2, db = Math.min(b, pitch - b) / Math.SQRT2;
+    const d = Math.min(da, db);
+    const cov = Math.max(0, Math.min(1, half + 0.5 - d));
+    const i = (y * N + x) * 4;
+    const v = 104 + (r() - 0.5) * 14 + (da < db ? 8 : -6);         // the two wire directions catch the light differently
+    data[i] = v; data[i + 1] = v + 4; data[i + 2] = v + 9; data[i + 3] = Math.round(cov * 255);
+  }
+  const t = new THREE.DataTexture(data, N, N, THREE.RGBAFormat);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.magFilter = THREE.LinearFilter; t.minFilter = THREE.LinearMipmapLinearFilter; t.generateMipmaps = true;
+  t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 8; t.needsUpdate = true;
   return t;
+}
+
+// Soft glow round a tunnel luminaire (additive): elongated falloff, white centre.
+export function lampGlow() {
+  const W = 64, H = 128, c = canvas(W, H), x = c.getContext('2d');
+  const img = x.createImageData(W, H);
+  for (let y = 0; y < H; y++) for (let xx = 0; xx < W; xx++) {
+    const u = (xx + 0.5) / W * 2 - 1, v = (y + 0.5) / H * 2 - 1;
+    const dx = Math.max(0, Math.abs(u) - 0.18) / 0.82, dy = Math.max(0, Math.abs(v) - 0.42) / 0.58;
+    const d = Math.min(1, Math.hypot(dx, dy));
+    const a = Math.pow(1 - d, 2.2);
+    const i = (y * W + xx) * 4;
+    img.data[i] = 255 * a; img.data[i + 1] = 244 * a; img.data[i + 2] = 222 * a; img.data[i + 3] = 255;
+  }
+  x.putImageData(img, 0, 0);
+  return tex(c, { repeat: false });
 }
 
 export function concrete(size = 256, base = 182) {
@@ -329,19 +440,32 @@ export function facade(variant = 0) {
   return tex(c, { aniso: 4 });
 }
 
-// Grandstand crowd: dense coloured dots on dark rows.
-export function crowd(density = 1) {
-  const W = 256, H = 128, c = canvas(W, H), x = c.getContext('2d');
-  x.fillStyle = '#2b2f36'; x.fillRect(0, 0, W, H);
-  const r = rng(5);
-  const cols = ['#e2202e', '#ffc20e', '#ffffff', '#1f4fbf', '#f36b21', '#2a9d4b', '#d9d9d9', '#111', '#c8102e', '#7cc4ff'];
-  const n = Math.floor(1400 * density);
-  for (let i = 0; i < n; i++) {
-    const row = Math.floor(r() * 8);
-    x.fillStyle = cols[Math.floor(r() * cols.length)];
-    x.fillRect(r() * W, row * 16 + 3 + r() * 4, 3, 5);
+// Empty grandstand seats (the stands are kept empty): one row seen from the track, 8 m x 0.8 m
+// on 512 x 64 px: fourteen 0.5 m moulded seats and a 1 m aisle with yellow step nosings. The
+// strip stands on each tread in front of the next riser, so the gaps show the grey concrete.
+export function seats() {
+  const W = 512, H = 64, c = canvas(W, H), x = c.getContext('2d'), r = rng(23);
+  const pxm = W / 8, py = H / 0.8;
+  x.fillStyle = '#8e9398'; x.fillRect(0, 0, W, H);                 // riser behind
+  x.fillStyle = 'rgba(0,0,0,0.25)'; x.fillRect(0, H - 0.36 * py, W, 0.36 * py);   // shade under the seats
+  for (let k = 0; k < 14; k++) {
+    const cx = (0.25 + k * 0.5) * pxm, sw = 0.42 * pxm;
+    const tone = r() < 0.04 ? '#9a1620' : '#c41a26';
+    // seat back (rounded top), lighter rim along its top
+    const top = H - 0.8 * py + 2, bk = H - 0.44 * py;
+    x.fillStyle = tone; x.beginPath();
+    x.moveTo(cx - sw / 2, bk); x.lineTo(cx - sw / 2, top + 6); x.quadraticCurveTo(cx - sw / 2, top, cx - sw / 2 + 6, top);
+    x.lineTo(cx + sw / 2 - 6, top); x.quadraticCurveTo(cx + sw / 2, top, cx + sw / 2, top + 6); x.lineTo(cx + sw / 2, bk); x.closePath(); x.fill();
+    x.fillStyle = 'rgba(255,255,255,0.28)'; x.fillRect(cx - sw / 2 + 4, top + 1, sw - 8, 2);
+    x.fillStyle = 'rgba(0,0,0,0.18)'; x.fillRect(cx - sw / 2, bk - 4, sw, 4);
+    // seat pan seen edge-on (folded up) and the bracket below it
+    x.fillStyle = '#7d1118'; x.fillRect(cx - sw / 2 + 2, bk, sw - 4, 0.06 * py);
+    x.fillStyle = '#3c3f44'; x.fillRect(cx - 2, bk + 0.06 * py, 4, H - bk - 0.06 * py);
   }
-  for (let row = 0; row < 8; row++) { x.fillStyle = 'rgba(0,0,0,0.35)'; x.fillRect(0, row * 16 + 13, W, 3); }
+  // aisle: steps with yellow nosings
+  const ax = 7 * pxm;
+  x.fillStyle = '#a3a8ad'; x.fillRect(ax, 0, pxm, H);
+  x.fillStyle = '#e2b007'; x.fillRect(ax, H - 3, pxm, 3); x.fillRect(ax, H / 2 - 2, pxm, 3);
   return tex(c);
 }
 
@@ -389,12 +513,15 @@ export function skyGradient() {
   const t = tex(c, { repeat: false }); return t;
 }
 
-// One atlas for all barrier faces (one material per chunk): rows top->bottom =
-// armco, advertising, Tecpro, concrete. Each row tiles horizontally.
-export const BARRIER_ROWS = { armco: 0, ads: 1, tecpro: 2, wall: 3 };
+// One atlas for all barrier faces (one material per chunk): eight 128 px rows, each tiling
+// horizontally. 'flat' is a plain light row for posts, frames and caps (tinted by vertex colour).
+export const BARRIER_ROWS = { armco: 0, ads: 1, tecpro: 2, wall: 3, flat: 4, ads2: 5, tunnel: 6, ads3: 7 };
+export const BARRIER_NROWS = 8;
+export const barrierRowV = (row, inset = 0.003) => [1 - (row + 1) / BARRIER_NROWS + inset, 1 - row / BARRIER_NROWS - inset];
 export function barrierAtlas() {
-  const W = 1024, RH = 128, c = canvas(W, RH * 4), x = c.getContext('2d');
-  const rows = [armco().image, adWall().image, tecpro().image, concrete(256, 170).image];
+  const W = 1024, RH = 128, c = canvas(W, RH * BARRIER_NROWS), x = c.getContext('2d');
+  const flat = canvas(64, 128), fx = flat.getContext('2d'); fx.fillStyle = '#e8e8e8'; fx.fillRect(0, 0, 64, 128);
+  const rows = [armco().image, adWall(0).image, tecpro().image, concrete(256, 170).image, flat, adWall(1).image, tunnelWall().image, adWall(2).image];
   rows.forEach((img, i) => {
     for (let ox = 0; ox < W; ox += img.width * (RH / img.height)) x.drawImage(img, ox, i * RH, img.width * (RH / img.height), RH);
   });

@@ -5,13 +5,13 @@
 import * as THREE from 'three';
 import { CAMERA_MOUNTS } from './carspec.js';
 
-export const CAM_MODES = ['tcam', 'cockpit', 'chase'];
+export const CAM_MODES = ['cockpit', 'tcam', 'chase'];
 export const CAM_LABEL = { tcam: 'T-CAM', cockpit: 'COCKPIT', chase: 'CHASE' };
 
 export class CameraRig {
   constructor(camera) {
     this.cam = camera;
-    this.mode = 'tcam';
+    this.mode = 'cockpit';
     this.shake = 0; this.shakeT = 0;
     this.chasePos = new THREE.Vector3(); this.chaseInit = false;
     this.tmp = new THREE.Vector3(); this.tmpQ = new THREE.Quaternion(); this.m = new THREE.Matrix4();

@@ -157,7 +157,7 @@ async function setup(M) {
   setProgress(0.97, 'Almost there…'); await nextFrame();
 
   const rig = new M.cameras.CameraRig(camera);
-  rig.setMode(DEBUG.cam || settings.camera || 'tcam');
+  rig.setMode(DEBUG.cam || settings.camera || 'cockpit');
   const controls = new M.controls.Controls($('controls'));
   const timing = new M.timing.Timing(track);
   const hud = new M.hud.Hud();
@@ -459,6 +459,7 @@ function stepPhysics(app, dt, timed) {
 // warm luminaire fill); the exposure adapts with a lag like a broadcast camera or the eye:
 // slower when it has to open up entering the tunnel, faster when it closes down at the exit
 // (so the exit is briefly over-exposed, then settles).
+const TUNNEL_EXPOSURE = 2.4;
 function daylightAt(track, s) {
   const [a, b] = track.tunnelS;
   const edge = Math.min(track.deltaS(a, s), track.deltaS(s, b));   // metres inside the nearest portal
@@ -473,27 +474,39 @@ function updateLighting(app, dt) {
   const tk = 1 - dl;
   app.daylight = dl;
   const L = app.LIGHT;
-  sun.intensity = L.sun * (0.03 + 0.97 * dl);
-  // the car in a building's shadow: only its own sunlight fades (a quick, soft transition)
+  // the sun keeps lighting the world outside (the street seen through the portals and in the
+  // mirrors stays sun-lit, so the exit blows out at the tunnel exposure); only the car's own
+  // sunlight goes: in a building's shadow (baked table, a quick soft transition) and under the
+  // tunnel roof (the daylight at the car's position)
+  sun.intensity = L.sun;
   {
     const want = app.carShade ? app.carShade.at(veh.s, veh.d) : 0;
     const k = dt <= 0 ? 1 : 1 - Math.exp(-dt / 0.06);
     app.carSunShade += (want - app.carSunShade) * k;
-    app.M.lighting.CAR_SUN.value = 1 - 0.96 * app.carSunShade;
+    // in a street's shade a quarter of the sun is kept: the light bounced off the sun-lit
+    // facades and the road onto the car - its dark navy stays readable as navy, not black
+    const carDay = daylightAt(track, veh.s);
+    app.M.lighting.CAR_SUN.value = (1 - 0.75 * app.carSunShade) * (0.03 + 0.97 * carDay);
   }
-  hemi.intensity = L.hemi * (1 - 0.30 * tk);        // tunnel: warm luminaire fill
+  // under the roof the camera opens up (TUNNEL_EXPOSURE): the lights on the car are scaled
+  // down by the same factor, so it is lit as before while the sun-lit exit blows out
+  const kx = 1 + (1.75 / TUNNEL_EXPOSURE - 1) * tk;
+  hemi.intensity = L.hemi * (1 - 0.55 * tk) * kx;    // tunnel: warm luminaire fill
   hemi.color.copy(app.lightCols.sky).lerp(app.lightCols.lamp, tk);
   hemi.groundColor.copy(app.lightCols.ground).lerp(app.lightCols.floor, tk);
   // reflections: the outdoor sky until the camera is well under the roof, then the tunnel
   const envWanted = tk > 0.55 ? app.envs.tunnel : app.envs.outdoor;
   if (scene.environment !== envWanted) scene.environment = envWanted;
-  scene.environmentIntensity = tk > 0.55 ? L.env * (0.3 + 0.3 * tk) : L.env * (1 - 0.6 * tk);
-  const target = 1.0 + 0.32 * tk;            // the tunnel stays a little darker than daylight
+  scene.environmentIntensity = (tk > 0.55 ? L.env * (0.3 + 0.3 * tk) : L.env * (1 - 0.6 * tk)) * kx;
+  // the camera opens up under the roof (the interior is built dim, see trackmesh.js TUN): the
+  // luminaire rows glare, the concrete reads mid-grey and the exit is a blown-out opening
+  const target = 1.0 + (TUNNEL_EXPOSURE - 1) * tk;
   const jump = app.lightS === null || Math.abs(track.deltaS(app.lightS, sCam)) > 40;
   if (dt <= 0 || jump) app.exposure = target;                 // camera cut / teleport: no lag
   else app.exposure += (target - app.exposure) * (1 - Math.exp(-dt / (target > app.exposure ? 0.6 : 0.3)));
   app.lightS = sCam;
   renderer.toneMappingExposure = app.exposure;
+  app.sc.sky.material.uniforms.expo.value = app.exposure;
   // shadow camera follows the car
   const c = app.car.root.position;
   sun.target.position.copy(c);
@@ -609,6 +622,9 @@ function setupShot(app, name) {
     'corner-hairpin': { corner: 'hairpin', s: -15, d: -14, h: 14, look: [0, 0, 0], car: -2 },
     'corner-tunnel': { corner: 'tunnel', s: 180, d: 1.5, h: 2.2, look: [240, 0, 1.2], car: 205, tunnel: true },
     'corner-pool': { corner: 'pool1', s: -55, d: 3, h: 8, look: [20, -1, 0.5], car: -12 },
+    // key art for the loading screen (assets/hero.webp): the RB20 low and close, at speed
+    // (Swimming Pool: palms, the harbour-side blocks and the banners behind the car)
+    'hero': { corner: 'pool1', s: -27.2, d: -2.9, h: 0.55, look: [-33.2, -0.65, 1.25], car: -34.2, fov: 38, speed: 55 },
   };
   if (name === 'map') {
     const cam = new app.THREE.OrthographicCamera(-700, 700, 700 * innerHeight / innerWidth, -700 * innerHeight / innerWidth, 1, 3000);
@@ -619,13 +635,14 @@ function setupShot(app, name) {
   }
   const sh = shots[name] || shots.loading;
   const c = track.corners.find(cc => cc.id === sh.corner);
-  veh.reset(track.wrapS(c.s + sh.car), 0.5, { speed: 0 });
+  veh.reset(track.wrapS(c.s + sh.car), 0.5, { speed: sh.speed || 0 });
   syncCarVisual(app);
+  if (sh.speed) { const hel = car.find('helmet'); if (hel) hel.visible = true; }
   const p = track.pointAt(c.s + sh.s, sh.d);
   camera.position.set(p.x, p.y + sh.h, p.z);
   const l = track.pointAt(c.s + sh.look[0], sh.look[1]);
   camera.lookAt(l.x, l.y + sh.look[2], l.z);
-  camera.fov = 50; camera.updateProjectionMatrix();
+  camera.fov = sh.fov || 50; camera.near = 0.05; camera.updateProjectionMatrix();
   updateLighting(app, 0);
   { const cp = car.root.position; app.carEnv.update(new app.THREE.Vector3(cp.x, cp.y + 0.9, cp.z)); }
   app.mirrors.update(camera); app.mirrors.update(camera);

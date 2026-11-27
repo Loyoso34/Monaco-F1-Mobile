@@ -47,7 +47,7 @@ check('Menu has large Drive and Settings buttons', await page.isVisible('#btnDri
 await ev(() => localStorage.removeItem('monacoTT.best.v1'));
 await page.tap('#btnDrive');
 await wait(500);
-check('Default camera is the T-cam', (await ev(() => window.__app.rig.mode)) === 'tcam');
+check('Default camera is the cockpit (driver\'s eye)', (await ev(() => window.__app.rig.mode)) === 'cockpit');
 check('Car spawns before the start/finish line, timing not started', await ev(() => { const a = window.__app; return a.veh.s > a.track.L - 80 && a.timing.state === 'out'; }));
 
 // ---- touch controls ------------------------------------------------------------------------------

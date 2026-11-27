@@ -81,6 +81,7 @@ export class Controls {
     const x = t.clientX, y = t.clientY;
     if (this.steerTouch === null && this._hit(this.zone, x, y, 10)) {
       this.steerTouch = t.identifier; this.steerStartX = x; this.steerRaw = 0;
+      this.zone.classList.add('active');
       this._knob(0);
       return;
     }
@@ -110,7 +111,7 @@ export class Controls {
     }
   }
   _touchEnd(t) {
-    if (t.identifier === this.steerTouch) { this.steerTouch = null; this.steerRaw = 0; this._knob(0, true); }
+    if (t.identifier === this.steerTouch) { this.steerTouch = null; this.steerRaw = 0; this._knob(0, true); this.zone.classList.remove('active'); }
     this.pedalTouches.delete(t.identifier);
   }
   _knob(v, animate = false) {
@@ -122,6 +123,7 @@ export class Controls {
   // Release everything (focus loss, pause, restart)
   clear() {
     this.steerTouch = null; this.steerRaw = 0; this.steer = 0;
+    this.zone.classList.remove('active');
     this.pedalTouches.clear(); this.throttle = 0; this.brake = 0;
     this.keys.clear();
     this._knob(0, true);
