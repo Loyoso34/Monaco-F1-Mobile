@@ -2,6 +2,7 @@
 // transient messages. DOM text is refreshed at ~20 Hz; messages animate with opacity only.
 import { fmtTime } from './settings.js';
 import { SHIFT_RPM } from './physics.js';
+import { t } from './i18n.js';
 
 export class Hud {
   constructor() {
@@ -16,7 +17,18 @@ export class Hud {
     this.prev = {};
   }
   flashCamera(label) { this.el.camLabel.textContent = label; this.el.camLabel.style.opacity = '1'; this.camLabelT = 1.6; }
-  message(text, kind = '', dur = 2.5) { this.queue.push({ text, kind, dur }); }
+  // messages are kept as a key + values and rendered when shown, so they always appear (and
+  // stay) in the current language
+  message(key, vars, kind = '', dur = 2.5) { this.queue.push({ key, vars, kind, dur }); }
+  clearMessages() {
+    this.queue.length = 0;
+    for (let i = 0; i < 2; i++) { this.showing[i] = null; const el = i ? this.el.m2 : this.el.m1; el.classList.remove('on'); el.textContent = ''; }
+  }
+  // language switch: rewrite the text fields on the next refresh and the messages on screen now
+  relabel() {
+    this.prev.lap = null;
+    for (let i = 0; i < 2; i++) { const s = this.showing[i]; if (s) (i ? this.el.m2 : this.el.m1).textContent = t(s.key, s.vars); }
+  }
 
   set(k, el, v) { if (this.prev[k] !== v) { this.prev[k] = v; el.textContent = v; } }
 
@@ -26,14 +38,14 @@ export class Hud {
     // messages: two slots
     for (let i = 0; i < 2; i++) {
       const s = this.showing[i];
-      if (s) { s.t -= dt; if (s.t <= 0) { this.showing[i] = null; const el = i ? this.el.m2 : this.el.m1; el.classList.remove('on'); } }
+      if (s) { s.t -= dt; if (s.t <= 0) { this.showing[i] = null; const el = i ? this.el.m2 : this.el.m1; el.classList.remove('on'); setTimeout(() => { if (!this.showing[i]) el.textContent = ''; }, 300); } }
     }
     while (this.queue.length && (!this.showing[0] || !this.showing[1])) {
       const m = this.queue.shift();
       const i = !this.showing[0] ? 0 : 1;
       const el = i ? this.el.m2 : this.el.m1;
-      el.textContent = m.text; el.className = 'm on ' + (m.kind || '');
-      this.showing[i] = { t: m.dur };
+      el.textContent = t(m.key, m.vars); el.className = 'm on ' + (m.kind || '');
+      this.showing[i] = { t: m.dur, key: m.key, vars: m.vars };
     }
     if (this.acc < 0.05) return;
     this.acc = 0;
@@ -53,7 +65,7 @@ export class Hud {
     this.el.cur.classList.toggle('invalid', timing.invalid);
     this.set('last', this.el.last, fmtTime(timing.last));
     this.set('best', this.el.best, fmtTime(timing.best));
-    this.set('lap', this.el.lap, timing.state === 'out' ? 'OUT LAP' : `LAP ${timing.lapNo}${timing.invalid ? ' · INVALID' : ''}`);
+    this.set('lap', this.el.lap, timing.state === 'out' ? t('hud.outLap') : t('hud.lap', { n: timing.lapNo }) + (timing.invalid ? t('hud.invalid') : ''));
     if (fps != null) this.set('fps', this.el.fps, fps);
     // damage diagram
     const dm = car.damage;

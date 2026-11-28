@@ -40,6 +40,11 @@ vendored.
   **pause** (Resume, Quick Restart, Reset Car, Settings, Return to Menu).
 * The controls sit low in the corners, clear of the apex, both mirrors and the wheel display; the
   steering zone lights up while your thumb is on it.
+* **Language:** Türkçe / English, from the flags at the top-right of the main menu (or Settings →
+  Language). The switch is instant, everywhere (menus, HUD, controls, messages, loading screen),
+  and remembered on the device; the first visit follows the phone's language.
+* Every button acts on the first tap, with a pressed state as soon as it is touched; the steering
+  zone and both pedals work together with three thumbs/fingers down.
 * Keyboard (desktop): arrows / WASD, C camera, P pause, R reset car.
 
 **Rules:** timing starts on your first forward crossing of the line; a lap counts after every

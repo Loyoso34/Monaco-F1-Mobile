@@ -3,6 +3,8 @@
 import { buildTrack } from './track-core.js';
 import { settings, saveSettings, clearBest, loadBest, fmtTime } from './settings.js';
 import { startBench, benchFrame } from './bench.js';
+import { t, tReason, setLang, onLang, getLang } from './i18n.js';
+import { onTap } from './tap.js';
 
 const $ = (id) => document.getElementById(id);
 const P = new URLSearchParams(location.search);
@@ -15,13 +17,18 @@ const DEBUG = {
 // ---------------------------------------------------------------------------------------------
 // Loading screen: brand sequence (CSS), real progress on a hairline bar.
 const track = buildTrack();
-let progress = 0;
-function setProgress(p, label) {
+let progress = 0, progressKey = 'ld.loading';
+function setProgress(p, key) {
   progress = Math.max(progress, p);
   $('loadBar').style.width = (progress * 100).toFixed(0) + '%';
   $('loadPct').textContent = Math.round(progress * 100) + '%';
-  if (label) $('ldStatus').textContent = label.replace(/…$/, '');
+  if (key) { progressKey = key; $('ldStatus').textContent = t(key); }
 }
+// language: the selector works from the first moment (also while loading); every piece of text
+// built in code re-renders on a switch (onLang handlers below and in bindUI)
+window.__tErr = (m) => t('err.error', { m });
+document.querySelectorAll('[data-lang]').forEach((b) => onTap(b, () => setLang(b.dataset.lang)));
+onLang(() => { $('ldStatus').textContent = t(progressKey); });
 const nextFrame = () => new Promise(r => requestAnimationFrame(() => setTimeout(r, 0)));
 
 // iOS / Android only allow audio to start inside a user gesture: create and unlock the
@@ -46,19 +53,19 @@ window.addEventListener('touchend', unlockAudio, { passive: true });
 // ---------------------------------------------------------------------------------------------
 let THREE, App;
 async function boot() {
-  setProgress(0.04, 'Loading engine…');
+  setProgress(0.04, 'ld.engine');
   THREE = await import('three');
-  setProgress(0.30, 'Loading car…');
+  setProgress(0.30, 'ld.car');
   const [carmodel, carspec, physics, autopilot] = await Promise.all([
     import('./carmodel.js'), import('./carspec.js'), import('./physics.js'), import('./autopilot.js'),
   ]);
-  setProgress(0.40, 'Loading circuit…');
+  setProgress(0.40, 'ld.circuit');
   const [trackmesh, scenery, corridor, cameras, controls, timing, hud, fx, audio, perf, envmap, mirrors, lighting, carenv, shade] = await Promise.all([
     import('./trackmesh.js'), import('./scenery.js'), import('./corridor.js'), import('./cameras.js'), import('./controls.js'), import('./timing.js'),
     import('./hud.js'), import('./fx.js'), import('./audio.js'), import('./perf.js'), import('./envmap.js'),
     import('./mirrors.js'), import('./lighting.js'), import('./carenv.js'), import('./shade.js'),
   ]);
-  setProgress(0.48, 'Building circuit…');
+  setProgress(0.48, 'ld.build');
   await nextFrame();
   App = await setup({ carmodel, carspec, physics, autopilot, trackmesh, scenery, corridor, cameras, controls, timing, hud, fx, audio, perf, envmap, mirrors, lighting, carenv, shade });
 }
@@ -100,22 +107,22 @@ async function setup(M) {
   // Monaco, and a tunnel version swapped in under the tunnel roof; built once the sun
   // direction is known (after the scenery)
   scene.environmentIntensity = LIGHT.env;
-  setProgress(0.52, 'Building circuit…'); await nextFrame();
+  setProgress(0.52, 'ld.build'); await nextFrame();
 
   const racingLine = M.autopilot.buildRacingLine(track);
   // exclusion corridor around every section of the lap: pavement widths, terrain carving and
   // the placement of every building / prop are derived from it
   const corridor = M.corridor.buildCorridor(track);
-  setProgress(0.58, 'Building circuit…'); await nextFrame();
+  setProgress(0.58, 'ld.build'); await nextFrame();
   const tm = M.trackmesh.buildTrackMeshes(track, { racingLine, quality: tierName, corridor });
   scene.add(tm.group);
-  setProgress(0.70, 'Building Monaco…'); await nextFrame();
+  setProgress(0.70, 'ld.monaco'); await nextFrame();
   const sc = M.scenery.buildScenery(track, { quality: tierName, renderer, corridor });
   scene.add(sc.root);
   const envs = { outdoor: M.envmap.outdoorEnv(renderer, sc.sunDir), tunnel: M.envmap.tunnelEnv(renderer) };
   // sun and shade between the buildings: baked into the road, kerbs, barriers and fences, and a
   // shade table along the lap for the car's own sunlight
-  setProgress(0.78, 'Building Monaco…'); await nextFrame();
+  setProgress(0.78, 'ld.monaco'); await nextFrame();
   const shadeT0 = performance.now();
   const shade = M.shade.buildShade(track, sc.buildings, sc.groundAt, sc.sunDir, { maxGround: sc.groundMax });
   {
@@ -127,7 +134,7 @@ async function setup(M) {
   const shadeMs = performance.now() - shadeT0;
   scene.environment = envs.outdoor;
   sun.position.copy(sc.sunDir).multiplyScalar(60);
-  setProgress(0.82, 'Preparing the RB20…'); await nextFrame();
+  setProgress(0.82, 'ld.rb20'); await nextFrame();
   const car = M.carmodel.createCar({ quality: tierName });
   scene.add(car.root);
   // the car's materials take their sunlight through the building-shade factor (lighting.js)
@@ -147,14 +154,14 @@ async function setup(M) {
   const carEnv = new M.carenv.CarEnv(renderer, scene, car.root, tierName);
   perf.onTier = (t) => { mirrors.setTier(t); carEnv.setTier(t); };
   const veh = new M.physics.Vehicle(track, { assists: settings.assists });
-  setProgress(0.90, 'Compiling shaders…'); await nextFrame();
+  setProgress(0.90, 'ld.shaders'); await nextFrame();
   // place a camera near the start for the shader warm-up
   car.root.position.set(track.px[0], track.py[0], track.pz[0]);
   camera.position.set(track.px[0] + 5, track.py[0] + 3, track.pz[0] + 5); camera.lookAt(car.root.position);
   // the car's live environment first, so its materials compile once with the final setup
   carEnv.update(new THREE.Vector3(track.px[0], track.py[0] + 0.9, track.pz[0]));
   try { await renderer.compileAsync?.(scene, camera); } catch { renderer.compile(scene, camera); }
-  setProgress(0.97, 'Almost there…'); await nextFrame();
+  setProgress(0.97, 'ld.almost'); await nextFrame();
 
   const rig = new M.cameras.CameraRig(camera);
   rig.setMode(DEBUG.cam || settings.camera || 'cockpit');
@@ -178,9 +185,9 @@ async function setup(M) {
 // Cinematic menu shots: Sainte Dévote, the Fairmont hairpin, the harbour (and the tunnel exit).
 const SHOTS = [
   // cam: [s offset from the corner, lateral d (+ left), height]; the camera tracks the car TV-style
-  { label: 'Sainte Dévote', sub: 'Turn 1', corner: 'ste-devote', cam: [22, 12.5, 4.5], lead: 150, dur: 8.5, fov: 36 },
-  { label: 'Fairmont Hairpin', sub: 'Turn 6', corner: 'hairpin', cam: [4, -13, 9], lead: 95, dur: 8.5, fov: 40 },
-  { label: 'Port Hercule', sub: 'Tabac · Swimming Pool', corner: 'pool1', cam: [-35, 36, 11], lead: 170, dur: 9, fov: 36 },
+  { label: 'cine.devote', labelLang: 'fr', sub: ['cine.turn', { n: 1 }], corner: 'ste-devote', cam: [22, 12.5, 4.5], lead: 150, dur: 8.5, fov: 36 },
+  { label: 'cine.hairpin', sub: ['cine.turn', { n: 6 }], corner: 'hairpin', cam: [4, -13, 9], lead: 95, dur: 8.5, fov: 40 },
+  { label: 'cine.harbour', labelLang: 'fr', sub: ['cine.harbourSub'], subLang: 'en', corner: 'pool1', cam: [-35, 36, 11], lead: 170, dur: 9, fov: 36 },
 ];
 
 function startCine(app, i) {
@@ -190,9 +197,20 @@ function startCine(app, i) {
   const c = track.corners.find(cc => cc.id === shot.corner);
   veh.reset(track.wrapS(c.s - shot.lead), app.auto.line.d[track.idxOfS(c.s - shot.lead)], { speed: 40 });
   car.repair();
-  $('cineLabel').innerHTML = `<small>${shot.sub}</small>${shot.label}`;
+  renderCineLabel(shot);
   $('cineLabel').style.opacity = '1';
 }
+
+function renderCineLabel(shot) {
+  const el = $('cineLabel'); el.textContent = '';
+  // proper names keep their own capitals (Turkish uppercasing would write SAİNTE DÉVOTE)
+  const sm = document.createElement('small'); sm.textContent = t(shot.sub[0], shot.sub[1]);
+  if (shot.subLang) sm.lang = shot.subLang;
+  const nm = document.createElement('span'); nm.textContent = t(shot.label);
+  if (shot.labelLang) nm.lang = shot.labelLang;
+  el.append(sm, nm);
+}
+function menuBestText(best) { return best ? t('menu.best', { t: fmtTime(best) }) : t('menu.first'); }
 
 function updateCine(app, dt) {
   const { track, camera, THREE } = app;
@@ -225,8 +243,8 @@ function enterMenu(app) {
   app.controls.enabled = false; app.controls.clear();
   app.audio.setEngineOn(false);
   app.fx.clear();
-  const best = app.timing.best;
-  $('menuBest').textContent = best ? `Personal best  ${fmtTime(best)}` : 'Set your first lap around Monaco';
+  app.hud.clearMessages(); app.timing.messages.length = 0;
+  $('menuBest').textContent = menuBestText(app.timing.best);
   startCine(app, DEBUG.cine ? +DEBUG.cine : 0);
 }
 
@@ -237,7 +255,7 @@ function startDriving(app) {
   quickRestart(app, true);
   app.controls.enabled = true;
   app.audio.setEngineOn(true);
-  app.hud.flashCamera(app.M.cameras.CAM_LABEL[app.rig.mode]);
+  app.hud.flashCamera(t('cam.' + app.rig.mode));
 }
 
 // Repaired car at the original start, timing cleared, personal best and camera preserved.
@@ -249,6 +267,7 @@ function quickRestart(app, fromMenu = false) {
   car.repair();
   fx.clear();
   timing.reset(); timing.teleport(veh.s);
+  timing.messages.length = 0; app.hud.clearMessages();
   controls.clear();
   app.simTime = 0; app.acc = 0; app.crashT = 0;
   app.rig.chaseInit = false;
@@ -272,7 +291,8 @@ function pause(app, reason) {
   app.state = 'paused';
   app.controls.enabled = false; app.controls.clear();
   app.audio.suspend();
-  $('pauseSub').textContent = reason === 'focus' ? 'Paused while the app was in the background. The lap timer is frozen.' : 'The lap timer is frozen.';
+  app.pauseReason = reason;
+  $('pauseSub').textContent = t(reason === 'focus' ? 'pause.focus' : 'pause.sub');
   show('pause', true);
 }
 function resume(app) {
@@ -384,13 +404,13 @@ function frame(app) {
     syncCarVisual(app);
     controls.setLock(veh.wheels[0].locked || veh.wheels[1].locked);
     timing.update(veh, app.simTime);
-    for (const m of timing.messages) hud.message(m.text, m.kind, m.dur);
+    for (const m of timing.messages) hud.message(m.key, m.vars, m.kind, m.dur);
     timing.messages.length = 0;
     if (veh.damage.undriveable && app.state === 'driving') {
       app.crashT += dt;
       if (app.crashT > 1.4) {
         app.state = 'crashed';
-        $('crashMsg').textContent = veh.damage.reason + '. The survival cell is intact.';
+        $('crashMsg').textContent = t('crash.cell', { r: tReason(veh.damage.reason) });
         show('crash', true); controls.enabled = false; controls.clear();
       }
     }
@@ -522,22 +542,32 @@ function bindUI(app) {
   window.addEventListener('pointerdown', first, { once: false, passive: true });
   window.addEventListener('touchend', first, { passive: true });
 
-  $('btnDrive').onclick = () => { tapAudio(); startDriving(app); };
-  $('btnSettings').onclick = () => openSettings(app);
-  $('btnPause').onclick = () => pause(app, 'button');
-  $('btnResume').onclick = () => { tapAudio(); resume(app); };
-  $('btnRestart').onclick = () => { tapAudio(); quickRestart(app); };
-  $('btnReset').onclick = () => { tapAudio(); resetCar(app); };
-  $('btnPauseSettings').onclick = () => openSettings(app);
-  $('btnMenu').onclick = () => enterMenu(app);
-  $('btnCrashRestart').onclick = () => { tapAudio(); quickRestart(app); };
-  $('btnCrashMenu').onclick = () => enterMenu(app);
-  $('btnCam').onclick = () => {
+  // every button acts on the first tap (js/tap.js); state guards make a stray repeat harmless
+  onTap($('btnDrive'), () => { if (app.state !== 'menu') return; tapAudio(); startDriving(app); });
+  onTap($('btnSettings'), () => openSettings(app));
+  onTap($('btnPause'), () => pause(app, 'button'));
+  onTap($('btnResume'), () => { if (app.state !== 'paused') return; tapAudio(); resume(app); });
+  onTap($('btnRestart'), () => { tapAudio(); quickRestart(app); });
+  onTap($('btnReset'), () => { if (app.state !== 'paused') return; tapAudio(); resetCar(app); });
+  onTap($('btnPauseSettings'), () => openSettings(app));
+  onTap($('btnMenu'), () => enterMenu(app));
+  onTap($('btnCrashRestart'), () => { tapAudio(); quickRestart(app); });
+  onTap($('btnCrashMenu'), () => enterMenu(app));
+  onTap($('btnCam'), () => {
     const modes = app.M.cameras.CAM_MODES;
     const next = modes[(modes.indexOf(app.rig.mode) + 1) % modes.length];
     app.rig.setMode(next); settings.camera = next; saveSettings();
-    app.hud.flashCamera(app.M.cameras.CAM_LABEL[next]);
-  };
+    app.hud.flashCamera(t('cam.' + next));
+  });
+  // a language switch re-renders all text built in code, wherever the game is
+  onLang(() => {
+    if (app.state === 'menu') { $('menuBest').textContent = menuBestText(app.timing.best); renderCineLabel(SHOTS[app.cine.idx % SHOTS.length]); }
+    $('pauseSub').textContent = t(app.pauseReason === 'focus' ? 'pause.focus' : 'pause.sub');
+    if (app.veh.damage.undriveable) $('crashMsg').textContent = t('crash.cell', { r: tReason(app.veh.damage.reason) });
+    if ($('settings').classList.contains('on')) $('btnClearBest').textContent = t(app.__bestCleared ? 'set.cleared' : 'set.clear');
+    app.hud.relabel();
+    if (app.hud.camLabelT > 0) app.hud.flashCamera(t('cam.' + app.rig.mode));
+  });
   window.addEventListener('keydown', (e) => {
     if (e.code === 'KeyC') $('btnCam').click();
     if (e.code === 'KeyP' || e.code === 'Escape') { if (app.state === 'driving') pause(app, 'button'); else if (app.state === 'paused') resume(app); }
@@ -566,20 +596,21 @@ function openSettings(app) {
   const seg = (id, key, onSet) => {
     const el = $(id);
     const sync = () => el.querySelectorAll('button').forEach(b => b.classList.toggle('on', String(settings[key]) === b.dataset.v || (key === 'camera' && app.rig.mode === b.dataset.v)));
-    el.querySelectorAll('button').forEach(b => b.onclick = () => {
+    el.querySelectorAll('button').forEach(b => onTap(b, () => {
       settings[key] = key === 'showFps' ? b.dataset.v === '1' : b.dataset.v;
       if (key === 'showFps') settings[key] = b.dataset.v === '1';
       saveSettings(); onSet && onSet(settings[key]); sync();
-    });
+    }));
     sync();
   };
   seg('segCam', 'camera', (v) => { app.rig.setMode(v); });
   seg('segGfx', 'gfx', (v) => { app.perf.setTier(v === 'auto' ? app.M.perf.autoTier() : v); });
   seg('segAssist', 'assists', (v) => { app.veh.assists = v; });
   $('segFps').querySelectorAll('button').forEach(b => b.classList.toggle('on', (settings.showFps ? '1' : '0') === b.dataset.v));
-  $('segFps').querySelectorAll('button').forEach(b => b.onclick = () => { settings.showFps = b.dataset.v === '1'; app.fpsShown = settings.showFps; $('fps').style.display = app.fpsShown ? 'block' : 'none'; saveSettings(); $('segFps').querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b)); });
-  $('btnClearBest').onclick = () => { clearBest(); app.timing.best = null; $('btnClearBest').textContent = 'Best lap cleared'; };
-  $('btnSettingsBack').onclick = () => { panel.classList.remove('on'); $('btnClearBest').textContent = 'Clear best lap'; if (app.state === 'menu') { const b = app.timing.best; $('menuBest').textContent = b ? `Personal best  ${fmtTime(b)}` : 'Set your first lap around Monaco'; } };
+  $('segFps').querySelectorAll('button').forEach(b => onTap(b, () => { settings.showFps = b.dataset.v === '1'; app.fpsShown = settings.showFps; $('fps').style.display = app.fpsShown ? 'block' : 'none'; saveSettings(); $('segFps').querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b)); }));
+  app.__bestCleared = false; $('btnClearBest').textContent = t('set.clear');
+  onTap($('btnClearBest'), () => { clearBest(); app.timing.best = null; app.__bestCleared = true; $('btnClearBest').textContent = t('set.cleared'); });
+  onTap($('btnSettingsBack'), () => { panel.classList.remove('on'); app.__bestCleared = false; $('btnClearBest').textContent = t('set.clear'); if (app.state === 'menu') $('menuBest').textContent = menuBestText(app.timing.best); });
   panel.classList.add('on');
 }
 
@@ -592,7 +623,7 @@ boot().then(() => {
   window.__app = app;
   bindUI(app);
   if (app.fpsShown) $('fps').style.display = 'block';
-  setProgress(1, 'Ready');
+  setProgress(1, 'ld.ready');
   if (DEBUG.shot) { setupShot(app, DEBUG.shot); return; }
   app.lastFrame = performance.now();
   if (DEBUG.start === 'drive' || DEBUG.bench) startDriving(app);
@@ -607,7 +638,7 @@ boot().then(() => {
   window.__ready = true;
 }).catch((e) => {
   console.error(e);
-  const el = $('err'); el.style.display = 'block'; el.textContent = 'Could not start: ' + (e && e.message || e);
+  const el = $('err'); el.style.display = 'block'; el.textContent = t('err.start', { m: e && e.message || e });
 });
 
 // Debug helper used by tools/capture.mjs to render the loading image & corner thumbnails

@@ -25,7 +25,7 @@ export class Timing {
   invalidate(reason) {
     if (this.state !== 'running' || this.invalid) return;
     this.invalid = true; this.invalidReason = reason;
-    this.messages.push({ text: reason === 'cut' ? 'Lap invalid — corner cut.' : 'Lap invalid — car reset.', kind: 'bad', dur: 3.2 });
+    this.messages.push({ key: reason === 'cut' ? 'msg.cut' : 'msg.reset', kind: 'bad', dur: 3.2 });
   }
 
   update(car, simTime) {
@@ -69,7 +69,7 @@ export class Timing {
   _forwardCross(t) {
     if (this.state === 'out') {
       this._startLap(t);
-      this.messages.push({ text: 'Lap started', kind: 'good', dur: 1.6 });
+      this.messages.push({ key: 'msg.lapStarted', kind: 'good', dur: 1.6 });
       return;
     }
     const complete = this.nextCp >= this.T.checkpoints.length;
@@ -78,9 +78,9 @@ export class Timing {
       this.last = lap;
       const pb = this.best === null || lap < this.best;
       if (pb) { this.best = lap; saveBest(lap); }
-      this.messages.push({ text: (pb ? 'Personal best  ' : 'Lap  ') + fmt(lap), kind: pb ? 'best' : 'good', dur: 4.5, lap });
+      this.messages.push({ key: pb ? 'msg.pb' : 'msg.lap', vars: { t: fmt(lap) }, kind: pb ? 'best' : 'good', dur: 4.5, lap });
     } else if (complete && this.invalid) {
-      this.messages.push({ text: 'Lap not counted — corner cut', kind: 'bad', dur: 2.5 });
+      this.messages.push({ key: 'msg.notCounted', kind: 'bad', dur: 2.5 });
     }
     this._startLap(t);
   }

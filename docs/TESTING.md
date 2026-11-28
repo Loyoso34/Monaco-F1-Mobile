@@ -176,6 +176,7 @@ node tools/serve.mjs 8080                    # local server
 node tools/gameplay-test.mjs out iphone      # 43 acceptance checks (emulated)
 node tools/gameplay-test.mjs out android
 BASE_URL=https://loyoso34.github.io/Monaco-F1-Mobile/ node tools/gameplay-test.mjs out iphone   # against the live site
+node tools/ui-test.mjs out                   # languages + first-tap buttons + multi-touch (real touch events)
 node tools/inspect-circuit.mjs               # circuit inspection, all graphics tiers (exit code 1 on failure)
 node tools/straight-line-test.mjs            # zero steering / barrier brushes (exit code 1 on failure)
 node tools/handling-test.mjs                 # braking (no ABS), trail braking, launches, corner exits

@@ -1,3 +1,4 @@
+import { t } from './i18n.js';
 // On-device benchmark (open the game with ?bench=1): the test driver laps Monaco from the
 // start line in the selected camera with everything rendered (mirrors, shadows, the tunnel), and
 // the frame times are recorded with the adaptive resolution switched off. A result panel then
@@ -59,7 +60,7 @@ function finish(app) {
   const el = document.createElement('div');
   el.id = 'benchOut';
   el.style.cssText = 'position:absolute;z-index:90;left:50%;top:50%;transform:translate(-50%,-50%);max-width:88vw;max-height:84vh;overflow:auto;background:rgba(6,7,10,0.92);color:#e9eaee;border:1px solid rgba(255,255,255,0.15);border-radius:14px;padding:16px 18px;font:13px/1.45 -apple-system,Helvetica,Arial,sans-serif;white-space:pre-wrap;user-select:text;-webkit-user-select:text';
-  el.textContent = 'F1-27 benchmark\n\n' + Object.entries(res).map(([k, v]) => `${k}: ${v}`).join('\n');
+  el.textContent = t('bench.title') + '\n\n' + Object.entries(res).map(([k, v]) => `${k}: ${v}`).join('\n');
   document.body.appendChild(el);
   console.log('BENCH', JSON.stringify(res));
 }

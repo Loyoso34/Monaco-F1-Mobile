@@ -53,7 +53,7 @@ export class Controls {
     return x >= r.left - pad && x <= r.right + pad && y >= r.top - pad && y <= r.bottom + pad;
   }
   _pedalAt(x, y) {
-    for (const k of ['brake', 'throttle']) if (this._hit(this.pedalEls[k], x, y, 14)) return k;
+    for (const k of ['brake', 'throttle']) if (this._hit(this.pedalEls[k], x, y, 22)) return k;
     return null;
   }
   _pedalValue(k, y) {
@@ -79,14 +79,17 @@ export class Controls {
 
   _touchStart(t) {
     const x = t.clientX, y = t.clientY;
-    if (this.steerTouch === null && this._hit(this.zone, x, y, 10)) {
+    if (this.steerTouch === null && this._hit(this.zone, x, y, 24)) {
       this.steerTouch = t.identifier; this.steerStartX = x; this.steerRaw = 0;
       this.zone.classList.add('active');
       this._knob(0);
       return;
     }
+    // a thumb on the pedal side is tracked even if it lands just off a pad: rolling onto the
+    // pad engages it at once (no lift-and-retap)
     const p = this._pedalAt(x, y);
-    if (p) this.pedalTouches.set(t.identifier, { pedal: p, value: this._pedalValue(p, y) });
+    const pr = this.pedalEls.brake.getBoundingClientRect();
+    if (p || x >= pr.left - 60) this.pedalTouches.set(t.identifier, { pedal: p, value: p ? this._pedalValue(p, y) : 0 });
   }
   _touchMove(t) {
     const x = t.clientX, y = t.clientY;
