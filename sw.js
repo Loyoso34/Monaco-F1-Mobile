@@ -1,6 +1,6 @@
 /* F1-27 Monaco Time Trial – service worker: network-first for the app code (updates appear on the
    next reload), cache-first for the vendored engine, icons and images (fast cold starts). */
-const VERSION = 'v1.3.0';
+const VERSION = 'v1.3.1';
 const CACHE = 'monaco-tt-' + VERSION;
 const CORE = ['./', './index.html', './manifest.webmanifest', './vendor/three/three.module.min.js',
   './vendor/three/addons/BufferGeometryUtils.js', './vendor/three/addons/RoomEnvironment.js'];

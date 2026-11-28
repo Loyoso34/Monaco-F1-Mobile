@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>F1-27 icon render</title>
+<!-- Studio render of the in-game RB20 for the app icon (tools/make-icons.mjs). Opaque, square. -->
+<style>html,body{margin:0;height:100%;background:#000;overflow:hidden}canvas{display:block}</style>
+<script type="importmap">{"imports":{"three":"../vendor/three/three.module.min.js","three/addons/":"../vendor/three/addons/"}}</script>
+</head>
+<body>
+<script type="module">
+import * as THREE from 'three';
+import { RoomEnvironment } from 'three/addons/RoomEnvironment.js';
+import { createCar } from '../js/carmodel.js';
+import { Z } from '../js/carspec.js';
+import { setupRenderer } from '../js/lighting.js';
+const P = new URLSearchParams(location.search);
+const S = innerWidth;
+const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+renderer.setPixelRatio(1); renderer.setSize(S, S);
+setupRenderer(renderer);
+renderer.toneMappingExposure = +(P.get('exp') || 1.0);
+renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+document.body.appendChild(renderer.domElement);
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x040407);
+// dark studio reflections: the room environment, dimmed, so carbon and clear coat pick up soft
+// panel highlights without lifting the black background
+const pm = new THREE.PMREMGenerator(renderer);
+scene.environment = pm.fromScene(new RoomEnvironment(), 0.04).texture;
+scene.environmentIntensity = 0.42;
+
+const car = createCar({ quality: 'high' });
+const steer = -9 * Math.PI / 180;           // front wheels turned towards the camera
+car.update({ steer, steeringWheel: steer * 4.4, speed: 0, dash: { dt: 0.1, time: 0, rpm: 11000, kmh: 0, gear: '1', ers: 0.8, bias: 0.57, lock: false, limiter: false } });
+scene.add(car.root);
+// mirror image under a glossy black floor (a wet studio floor reflection)
+const refl = car.root.clone(true);
+refl.scale.y = -1; scene.add(refl);
+const floor = new THREE.Mesh(new THREE.PlaneGeometry(60, 60), new THREE.MeshBasicMaterial({ color: 0x010102, transparent: true, opacity: 0.8 }));
+floor.rotation.x = -Math.PI / 2; floor.position.y = 0.002; floor.receiveShadow = true; scene.add(floor);
+
+// lights: soft white key from the front-left above, red rim from behind-left, blue rim from
+// behind-right, a cool fill under the nose
+const key = new THREE.DirectionalLight(0xfff4e8, 3.0); key.position.set(-5, 7, -6); key.castShadow = true;
+key.shadow.mapSize.set(2048, 2048); Object.assign(key.shadow.camera, { left: -4, right: 4, top: 4, bottom: -4, near: 1, far: 30 });
+key.shadow.bias = -0.0004; scene.add(key);
+const red = new THREE.SpotLight(0xff1530, 38, 30, 0.6, 0.6, 1.4); red.position.set(-6, 2.2, 5); red.target.position.set(0, 0.4, 0); scene.add(red, red.target);
+const blue = new THREE.SpotLight(0x2a5cff, 40, 30, 0.6, 0.6, 1.4); blue.position.set(6, 2.4, 3.5); blue.target.position.set(0, 0.4, 0); scene.add(blue, blue.target);
+const top = new THREE.SpotLight(0xffffff, 60, 20, 0.5, 0.8, 1.5); top.position.set(0, 6, -1); top.target.position.set(0, 0.3, -0.8); scene.add(top, top.target);
+scene.add(new THREE.HemisphereLight(0x8ea6ff, 0x100608, 0.25));
+
+// front three-quarter, low and close: the nose and front wing lead, the car fills the frame
+const cam = new THREE.PerspectiveCamera(+(P.get('fov') || 26.5), 1, 0.05, 100);
+const cx = +(P.get('cx') || -4.3), cy = +(P.get('cy') || 1.15), cz = Z.FA - +(P.get('cd') || 6.0);
+cam.position.set(cx, cy, cz);
+cam.lookAt(+(P.get('lx') || 0.55), +(P.get('ly') || 0.0), Z.FA + +(P.get('lz') || 1.5));
+renderer.render(scene, cam);
+renderer.render(scene, cam);
+window.__ready = true;
+</script>
+</body>
+</html>
