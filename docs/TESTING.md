@@ -1,5 +1,103 @@
 # Testing report
 
+## 2026 environment upgrade: what was tested, and how
+
+Same environment as below: Chromium (Playwright) emulating an iPhone (iPhone 15 Pro Max user
+agent, 956 × 440 CSS px landscape, touch) on software WebGL (SwiftShader). **No iPhone, no
+Safari / WebKit, no GPU**: no frame rate in this report comes from a phone.
+
+**How it was reviewed.** Before any change the test driver lapped Monaco at racing speed and the
+game was captured from the driver's eye at 15 corners (`tools/onboard.mjs`), plus T-cam stops and
+elevated inspection views of every sector (`tools/views.mjs`); the same stops were captured again
+at the end. Every new element was then checked from the road, from above, top-down and from the
+cockpit (stairs, balustrades, benches, signs, billboards, bridges, gardens, mountains), and the
+circuit inspection was re-run after each placement change.
+
+**What the audit of the previous build found**, and what was done:
+
+| Found | Done |
+|---|---|
+| The upper half of the cockpit view was all flat facades: no light and shade between the buildings, straight roof lines, a plain sky | a static sun shadow map (buildings shade the facades opposite, balconies and canopies their walls, the Fairmont its slope); mansard roofs, dormers, chimneys; render grain and sky reflections in the glass; cumulus and cirrus |
+| A handful of simple palms and few trees; nothing on the pavements | Canary palms and Washingtonias, pines, cypresses and broadleaf trees on the hillsides (two LODs), pavement trees and shrubs, 130 streetlights, road signs and direction boards, benches and bins, Monaco flags |
+| Pavements ending in a bare drop to the streets below | stone balustrades along the retaining walls, following the curve and the slope; public stairways down |
+| Three generic banner sets | 16 fictional brands with their own marks at 128 px/m in seven sets; three overhead sponsor bridges; corner billboards; sponsor fascias on the grandstands |
+| Flat kerbs, bare barrier feet, plain fences | rounded kerbs, gutters, a shaded band into the barrier foot, moulded Tecpro, fence rails |
+| Mountains a flat-coloured ribbon; harbour water one repeating ripple | two pre-shaded, pre-hazed limestone ridges running into the sea as headlands; three blended ripple scales |
+
+**Problems found in the new work, and fixed** (seen in the inspection views or caught by the
+automated checks):
+
+| Problem | Fix |
+|---|---|
+| Grandstand side walls mirrored: 12 m grey triangles standing over the start straight, Casino and Tabac | walls turned the right way; canopy and front railing restored |
+| Corner billboards set square to the road: an 8 m panel reaching ~2 m over the barrier line (inspection: points in the drivable volume) | panels face the road, turned 25° to the approaching car, both ends checked behind the barrier line |
+| Balustrade bays fanning out into scattered blocks on the inside of the hairpin (top-down view) | bays run from one pavement-edge point to the next, only on full-width pavements in gentle bends |
+| Lumpier tree crowns put pavement trees over the barrier line below 5 m (inspection) | pruned, smaller, higher crowns at least 2.45 m behind the barrier line |
+| The far mountain ridge cut by the 6 km far plane; mountains washed out | ridge inside the far plane, colours re-graded |
+| Signs, benches, stairs and flags too pale (sRGB values used as linear vertex colours) | converted |
+| The Casino Square lawns never placed (no free ground at the planned spot), and would have floated over lower ground | searched round the square on both sides, seated on the lowest ground with kerb walls, clear of the street furniture |
+| Shadow acne: the static sun shadow drew diagonal bands on large gently sloped surfaces (grandstand canopies, paved squares, roofs) on High and Medium | slope-scaled bias: one shadow-map texel of depth per unit of slope towards the sun |
+| First complete build: +27 % draw calls and +47 % triangles per frame | optimised - see Performance |
+
+**Results** (final build):
+
+| Test | Result |
+|---|---|
+| Circuit inspection (`tools/inspect-circuit.mjs`) | **all checks pass on High, Medium and Low**: 0 scenery points in the drivable volume (every palm, tree, lamp, sign, bench, billboard, bridge deck and stair included), 0 buildings on pavements, 0 overlapping footprints of 622, 0 floating bases of 552 |
+| Acceptance checks (`tools/gameplay-test.mjs out iphone`) | **43 / 43** pass through the normal entry point (cold launch 4.1 s, emulated) |
+| Language and touch input (`tools/ui-test.mjs`, Türkçe and English) | **74 / 74** pass: the language selector (instant switch, persistence), every screen in each language, every button on the first tap exactly once, multi-touch driving |
+| Braking / traction (`tools/handling-test.mjs`), straight line (`tools/straight-line-test.mjs`) | **9 / 9**; all pass (no physics changes) |
+| Lap check at racing speed (`tools/lap-check.mjs`) | **12 / 12**: both mirrors live and varied at 64-271 km/h in sun, shade and the tunnel |
+| Halo markings shimmer (`tools/decal-shimmer-test.mjs`) | **4 / 4**: at or below the 16x supersampled ideal (sun / shade / tunnel, cockpit and T-cam) |
+| Materials in every light (`tools/material-check.mjs`) | **all pairs distinguishable** (closest: rubber / halo in shade, Delta-E 3.7) |
+| Tunnel transitions (`tools/tunnel-test.mjs out cockpit`) | unchanged: exposure 2.38 mean inside, entry 95 % adapted 1.83 s after the portal, exit settled 1.18 s after it, 0 non-finite values |
+
+**Two acceptance checks waited a fixed wall-clock time** that only held while the software
+renderer drew a frame faster than about every 0.75 s. Measured in the test's own context, the
+crash screen (shown 1.4 s of *game* time after the car becomes undriveable) took **47.9 s** of
+wall time on the previous build and **58.0 s** on this one (each software frame ~20 % slower);
+the mirror check gave each glass 1.5 s, which held one or two frames. Both now wait for the game
+state itself (the crash screen up to 120 s; both mirrors re-rendered twice since the car moved).
+The behaviour they check is unchanged and passes.
+
+Before / after, same cameras and positions (phone landscape size, 956 × 440):
+
+![Around the circuit: start / finish straight, Mirabeau, the hairpin, the Swimming Pool](img/env-elevated.webp)
+![T-cam: Casino Square, Beau Rivage, the Nouvelle Chicane approach, Tabac](img/env-tcam.webp)
+![Driver's eye at racing speed: Sainte Dévote, Beau Rivage, Nouvelle Chicane, Swimming Pool](img/env-onboard.webp)
+![Details: balustrades, pavement trees and streetlights, a stairway, a grandstand, harbour palms, the static sun shadow, the mountains, a sponsor bridge, a corner billboard](img/env-details.webp)
+
+### Performance (measured here; no phone, no GPU)
+
+No frame rate was measured on an iPhone. What was measured is the work per frame: every render
+pass summed (main view, the car's shadow, the mirror due that frame, the reflection-cube face,
+PMREM), High tier, 956 × 440, twelve points round the lap with the car at racing speed (same
+`perfall` probe as the overhaul below). Previous build = `0b097ba`:
+
+| Per frame | Previous build | After the upgrade |
+|---|---|---|
+| Draw calls, cockpit (default) | 227-349, average 293 | 249-396, average 321 (+10 %) |
+| Triangles, cockpit (default) | 399 k-605 k, average 506 k | 504 k-860 k, average 707 k (+40 %) |
+| Draw calls, T-cam | 214-330, average 278 | 230-359, average 302 (+9 %) |
+| Triangles, T-cam | 390 k-577 k, average 487 k | 486 k-842 k, average 673 k (+38 %) |
+| Busiest point (cockpit) | spawn 349 calls / 585 k | spawn 396 calls / 860 k |
+| GPU geometries / textures | 342 / 41 | 413 / 52 |
+
+What keeps it in budget: the city's sun shadow is rendered **once** at load (no shadow pass per
+frame) and read with four hardware-filtered comparisons, skipped on the half of the surfaces that
+face away from the sun; the hillside trees are one instanced mesh per species (~1,500 trees on
+High in 4 draw calls; far crowns of 1-3 coarse masses, chosen per tree at build time, so no
+popping); everything along the circuit is instanced per 640 m tile; trees, shrubs, flags, signs,
+furniture, balustrades, stairs and the mountains are drawn by the main camera only (the mirrors
+keep the road, barriers, buildings, palms and streetlights); street furniture is merged into one
+mesh per tile; props of nearly the same colour share one material; fence rails and balustrades
+carry only the faces that can be seen. The first complete build measured 371 calls / 742 k
+triangles on average (max 524 / 996 k) in the cockpit; the shipped build is shown above. Merging
+the hillside trees into one mesh per species trades ~35 k triangles drawn off-screen (clipped
+before any pixel work) for fewer draw calls, the costlier item for mobile Safari's WebGL. In the
+software renderer here, frames took ~20 % longer than on the previous build (measured midway
+through the optimisation).
+
 ## 2026 visual overhaul: what was tested, and how
 
 Same environment as below: a cloud container **without a phone and without a GPU** - Chromium

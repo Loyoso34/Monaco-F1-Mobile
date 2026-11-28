@@ -225,7 +225,9 @@ await ev(() => {
 await page.waitForFunction(() => window.__app.veh.damage.undriveable || window.__app.__ev.some(e => e.kind === 'heavy'), null, { timeout: 30000 }).catch(() => {});
 await wait(600);
 await page.screenshot({ path: path.join(out, `test_heavy_impact_${devName}.png`) });
-await page.waitForSelector('#crash.on', { timeout: 30000 }).catch(() => {});
+// the crash screen comes 1.4 s of game time after the car is undriveable: in software WebGL
+// (no GPU here) that is ~50-60 s of wall time, so wait up to 120 s
+await page.waitForSelector('#crash.on', { timeout: 120000 }).catch(() => {});
 const hv = await ev(() => { const a = window.__app; const d = a.veh.damage; return { ev: a.__ev, und: d.undriveable, reason: d.reason, nose: d.health.nose, fwL: d.health.fwL, fwR: d.health.fwR, wFL: d.health.wheelFL, wFR: d.health.wheelFR, debris: a.fx.debris.length, st: a.state, cell: true }; });
 check('Heavy frontal impact damages the nose, wing and front suspension', hv.ev.some(e => e.kind === 'heavy') && hv.nose < 0.5 && Math.min(hv.fwL, hv.fwR) < 0.3, `nose ${hv.nose.toFixed(2)}, wing L/R ${hv.fwL.toFixed(2)}/${hv.fwR.toFixed(2)}, wheels FL/FR ${hv.wFL.toFixed(2)}/${hv.wFR.toFixed(2)}, debris ${hv.debris}`);
 check('Undriveable car ends the run with Quick Restart offered', hv.und && hv.st === 'crashed' && await page.isVisible('#crash.on'), hv.reason);
@@ -261,9 +263,11 @@ const mirrorStats = async (id) => ev(async (id) => {
   // the reflection depends on the viewer: measure it from the driver's eye, the viewpoint the
   // glasses are aimed for (from the T-cam above and behind them they show mostly the car)
   a.rig.setMode('cockpit');
-  const r0 = a.mirrors.stats.renders;
-  await new Promise(r => setTimeout(r, 1500));
-  const out = { renders: a.mirrors.stats.renders - r0, mirrors: [] };
+  const r0 = a.mirrors.stats.renders, t0 = performance.now();
+  // one glass is re-rendered per frame: wait until both have been redrawn twice since the car
+  // moved (a fixed 1.5 s held only one or two frames in software GL)
+  await new Promise(r => { const f = () => { if (a.mirrors.stats.renders - r0 >= 4 || performance.now() - t0 > 30000) r(); else setTimeout(f, 100); }; f(); });
+  const out = { renders: a.mirrors.stats.renders - r0, secs: (performance.now() - t0) / 1000, mirrors: [] };
   for (const m of a.mirrors.list) {
     const { width: w, height: h } = m.rt;
     const buf = new Uint16Array(w * h * 4);
@@ -279,7 +283,7 @@ const mA = await mirrorStats('ste-devote'), mB = await mirrorStats('pool1');
 const diff = mA.mirrors.map((m, i) => { const o = mB.mirrors[i].lum; let d = 0; for (let k = 0; k < m.lum.length; k++) d += Math.abs(m.lum[k] - o[k]); return d / m.lum.length; });
 check('Mirrors render the scene behind the car in real time (two render targets, refreshed every frame pair)',
   mA.mirrors.length === 2 && mA.renders >= 2 && mA.mirrors.every(m => m.sd > 0.01 && m.mean > 0.005),
-  `${mA.renders} mirror passes in 1.5 s (software GL), ${mA.mirrors.map(m => `${m.side < 0 ? 'L' : 'R'} ${m.w}x${m.h} mean ${m.mean.toFixed(3)} sd ${m.sd.toFixed(3)}`).join(', ')}`);
+  `${mA.renders} mirror passes in ${mA.secs.toFixed(1)} s (software GL), ${mA.mirrors.map(m => `${m.side < 0 ? 'L' : 'R'} ${m.w}x${m.h} mean ${m.mean.toFixed(3)} sd ${m.sd.toFixed(3)}`).join(', ')}`);
 check('Mirror images change with the surroundings (Ste Dévote vs Swimming Pool)', diff.every(d => d > 0.01), `mean abs difference L ${diff[0].toFixed(3)}, R ${diff[1].toFixed(3)}`);
 
 check('No uncaught page errors', errors.length === 0, errors.slice(0, 3).join(' | '));

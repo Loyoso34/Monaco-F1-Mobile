@@ -39,7 +39,7 @@ class Builder {
 
 const C = {
   asphalt: [0.36, 0.36, 0.38], rubber: [0.22, 0.22, 0.24], white: [0.92, 0.92, 0.9],
-  red: [0.66, 0.045, 0.04], runoff: [0.40, 0.41, 0.43], walk: [0.70, 0.68, 0.64], walkEdge: [0.78, 0.76, 0.72],
+  red: [0.66, 0.045, 0.04], runoff: [0.40, 0.41, 0.43], walk: [0.70, 0.68, 0.64], walkEdge: [0.78, 0.76, 0.72], gutter: [0.62, 0.61, 0.58],
   pit: [0.30, 0.30, 0.32], green: [0.24, 0.42, 0.25], blueLine: [0.2, 0.4, 0.8],
 };
 const mul = (c, f) => [c[0] * f, c[1] * f, c[2] * f];
@@ -225,19 +225,38 @@ export function buildTrackMeshes(T, { racingLine = null, quality = 'high', corri
       const a = P(s0, ra[i]), b = P(s0, ra[i + 1]), c = P(s1, rb[i]), d = P(s1, rb[i + 1]);
       G.quad4(a, b, c, d, roadCol(ra[i] - lineD0, fa, ra[i]), roadCol(ra[i + 1] - lineD0, fa, ra[i + 1]), roadCol(rb[i] - lineD1, fb, rb[i]), roadCol(rb[i + 1] - lineD1, fb, rb[i + 1]), uvq(ra[i], ra[i + 1]));
     }
-    // kerbs: red/white 1 m stripes, slightly raised in the middle
+    // kerbs: red / white 1 m blocks with a low rounded profile - flush with the road at the
+    // inner edge, 3 cm high a third of the way out, 2 cm at the outer edge (with its face)
     const stripe = (Math.floor(s0) % 2) ? C.red : C.white;
-    if (A.cl > 0.05 || B.cl > 0.05) band(A.hw + A.cl, A.hw, B.hw + B.cl, B.hw, stripe, 0.0, 0.0, null, GP);
-    if (A.cr > 0.05 || B.cr > 0.05) band(-A.hw, -A.hw - A.cr, -B.hw, -B.hw - B.cr, stripe, 0.0, 0.0, null, GP);
+    const KH = 0.03, KO = 0.02, KF = 0.32;
+    if (A.cl > 0.05 || B.cl > 0.05) {
+      band(A.hw + A.cl * KF, A.hw, B.hw + B.cl * KF, B.hw, stripe, KH, 0, null, GP);
+      band(A.hw + A.cl, A.hw + A.cl * KF, B.hw + B.cl, B.hw + B.cl * KF, mul(stripe, 0.96), KO, KH, null, GP);
+      band(A.hw + A.cl, A.hw + A.cl, B.hw + B.cl, B.hw + B.cl, mul(stripe, 0.7), 0, KO, null, GP);
+    }
+    if (A.cr > 0.05 || B.cr > 0.05) {
+      band(-A.hw, -A.hw - A.cr * KF, -B.hw, -B.hw - B.cr * KF, stripe, 0, KH, null, GP);
+      band(-A.hw - A.cr * KF, -A.hw - A.cr, -B.hw - B.cr * KF, -B.hw - B.cr, mul(stripe, 0.96), KH, KO, null, GP);
+      band(-A.hw - A.cr, -A.hw - A.cr, -B.hw - B.cr, -B.hw - B.cr, mul(stripe, 0.7), KO, 0, null, GP);
+    }
     // run-off to the barriers, darkening into the foot of the barrier (contact shadow / grime)
+    // a 0.3 m concrete gutter along the barrier foot (where there is room), then the run-off
+    // asphalt darkening into it (contact shadow / grime)
     {
-      const AO_W = 0.75, dark = mul(C.runoff, 0.42);
-      const wl0 = Math.max(0, Math.min(AO_W, A.bl - A.hw - A.cl)), wl1 = Math.max(0, Math.min(AO_W, B.bl - B.hw - B.cl));
-      bandLat(A.bl, A.bl - wl0, B.bl, B.bl - wl1, dark, C.runoff);
-      band(A.bl - wl0, A.hw + A.cl, B.bl - wl1, B.hw + B.cl, C.runoff);
-      const wr0 = Math.max(0, Math.min(AO_W, A.br - A.hw - A.cr)), wr1 = Math.max(0, Math.min(AO_W, B.br - B.hw - B.cr));
-      band(-A.hw - A.cr, -A.br + wr0, -B.hw - B.cr, -B.br + wr1, C.runoff);
-      bandLat(-A.br + wr0, -A.br, -B.br + wr1, -B.br, C.runoff, dark);
+      const AO_W = 0.8, GW = 0.3, gut = C.gutter, gutD = mul(C.gutter, 0.5), mid = mul(C.runoff, 0.78);
+      const lane = (bar, edge) => {                       // widths of the gutter and the shaded band
+        const w = Math.max(0, bar - edge);
+        const g = w > 0.55 ? GW : 0, a = Math.max(g, Math.min(AO_W, w));
+        return [g, a];
+      };
+      const [gl0, al0] = lane(A.bl, A.hw + A.cl), [gl1, al1] = lane(B.bl, B.hw + B.cl);
+      if (gl0 > 0 || gl1 > 0) bandLat(A.bl, A.bl - gl0, B.bl, B.bl - gl1, gutD, gut);
+      bandLat(A.bl - gl0, A.bl - al0, B.bl - gl1, B.bl - al1, gl0 > 0 ? mid : mul(C.runoff, 0.42), C.runoff);
+      band(A.bl - al0, A.hw + A.cl, B.bl - al1, B.hw + B.cl, C.runoff);
+      const [gr0, ar0] = lane(A.br, A.hw + A.cr), [gr1, ar1] = lane(B.br, B.hw + B.cr);
+      band(-A.hw - A.cr, -A.br + ar0, -B.hw - B.cr, -B.br + ar1, C.runoff);
+      bandLat(-A.br + ar0, -A.br + gr0, -B.br + ar1, -B.br + gr1, C.runoff, gr0 > 0 ? mid : mul(C.runoff, 0.42));
+      if (gr0 > 0 || gr1 > 0) bandLat(-A.br + gr0, -A.br, -B.br + gr1, -B.br, gut, gutD);
     }
     if (!inTun) {
       // pavements beyond the barriers (raised 12 cm); pit lane on the start straight
@@ -422,6 +441,19 @@ export function buildTrackMeshes(T, { racingLine = null, quality = 'high', corri
   ARMCO_PROF.push([BAR_H, 0]);                     // up to the top cap (no slit under it)
   const BANNER_PROF = [[-0.05, 0], [0.06, 0], [0.09, 0.10], [1.00, 0.10], [1.03, 0], [BAR_H, 0]];
   const FLAT_PROF = (h) => [[-0.05, 0], [h, 0]];
+  // Tecpro blocks: a rounded vinyl face bulging 4 cm, its top edge rolling back over the block
+  const TECPRO_PROF = (h) => [[-0.05, 0], [0.06, 0.025], [0.3, 0.04], [h - 0.18, 0.04], [h - 0.05, 0.015], [h, -0.06]];
+  // a square-section steel tube along the barrier line (fence frame rails): front, top and
+  // underside faces between lap s0 and s1, at height h and `p` towards the track
+  // (only the faces the driver can see: the face towards the track, and for the rails above the
+  // eye the underside - 2 or 4 triangles per segment instead of a closed tube)
+  const rail = (Bld, side, s0, s1, o0, o1, ya, yb, h, p, r, col, under = true) => {
+    const at = (s, o, y, dp, dy) => { const q = T.pointAt(s, o - side * (p + dp)); return [q.x, y + h + dy, q.z]; };
+    const F0 = at(s0, o0, ya, r, -r), F1 = at(s0, o0, ya, r, r), F2 = at(s1, o1, yb, r, -r), F3 = at(s1, o1, yb, r, r);
+    const B0 = at(s0, o0, ya, -r, -r), B2 = at(s1, o1, yb, -r, -r);
+    if (side > 0) { Bld.quad(F1, F0, F3, F2, col, flatUV); if (under) Bld.quad(F0, B0, F2, B2, mul(col, 0.6), flatUV); }
+    else { Bld.quad(F0, F1, F2, F3, col, flatUV); if (under) Bld.quad(B0, F0, B2, F2, mul(col, 0.6), flatUV); }
+  };
   // lighting of a profile strip on the unlit tunnel walls: facing up brighter, down darker
   const stripShade = (pa, pb) => (pb[1] < pa[1] ? 1.12 : pb[1] > pa[1] ? 0.72 : 1);
   // extrude a profile along [s0, s1] at barrier offsets o0 / o1 (side: +1 left, -1 right)
@@ -453,7 +485,8 @@ export function buildTrackMeshes(T, { racingLine = null, quality = 'high', corri
     }
   };
   // which ad set a banner section shows (varies along the lap)
-  const adRow = (s) => ['ads', 'ads2', 'ads3'][Math.floor(T.wrapS(s) / 96) % 3];
+  // banner sponsor set: changes every 48 m (two 4 m panels repeat inside a set, 8 m per tile)
+  const adRow = (s) => TX.AD_ROWS[Math.floor(T.wrapS(s) / 48) % TX.AD_ROWS.length];
   for (const side of [1, -1]) {
     let skipUntil = -1;
     for (let s0 = 0; s0 < L; s0 += 1) {
@@ -475,7 +508,7 @@ export function buildTrackMeshes(T, { racingLine = null, quality = 'high', corri
         const into = T.deltaS(T.tunnelS[0], s0);
         const board = Math.floor(into / 62) % 2 === 1 && (into % 62) < 7;
         const railCol = (sq, h) => mul([1, 1, 1], tunnelLight(sq, off(sq), h) * TUN.rail * aoH(h));
-        if (board) extrude(W, side, s0, s1, o0, o1, y0a, y0b, BANNER_PROF, RV('ads'), 16, railCol, { tunnelShade: true });
+        if (board) extrude(W, side, s0, s1, o0, o1, y0a, y0b, BANNER_PROF, RV(adRow(s0)), 8, railCol, { tunnelShade: true });
         else extrude(W, side, s0, s1, o0, o1, y0a, y0b, ARMCO_PROF, RV('armco'), 4, railCol, { tunnelShade: true });
         // rail top cap back to the wall (closes the gap behind the armco)
         const wo = side * WALL_OFF;
@@ -541,8 +574,9 @@ export function buildTrackMeshes(T, { racingLine = null, quality = 'high', corri
       const h = typ === 'tecpro' ? 1.2 : typ === 'pitwall' ? 1.2 : BAR_H;
       const white = (sq, hh) => mul([1, 1, 1], aoH(hh));
       if (typ === 'armco') extrude(B, side, s0, s1, o0, o1, y0a, y0b, ARMCO_PROF, RV('armco'), 4, white);
-      else if (typ === 'ads') extrude(B, side, s0, s1, o0, o1, y0a, y0b, BANNER_PROF, RV(adRow(s0)), 16, white);
-      else extrude(B, side, s0, s1, o0, o1, y0a, y0b, FLAT_PROF(h), RV(typ === 'pitwall' ? 'wall' : 'tecpro'), typ === 'tecpro' ? 8 : 4, white);
+      else if (typ === 'ads') extrude(B, side, s0, s1, o0, o1, y0a, y0b, BANNER_PROF, RV(adRow(s0)), 8, white);
+      else if (typ === 'tecpro') extrude(B, side, s0, s1, o0, o1, y0a, y0b, TECPRO_PROF(h), RV('tecpro'), 8, white);
+      else extrude(B, side, s0, s1, o0, o1, y0a, y0b, FLAT_PROF(h), RV('wall'), 4, white);
       // top cap back over the posts
       {
         const pa = T.pointAt(s0, o0), pb = T.pointAt(s1, o1);
@@ -565,6 +599,11 @@ export function buildTrackMeshes(T, { racingLine = null, quality = 'high', corri
           ch.fence.quad(a, b, c, d, [1, 1, 1], uv);
           vAcc += seg;
         }
+        // the fence frame: a tube at the knee and along the top of the leaning panel (the foot of
+        // the mesh sits on the barrier's cap)
+        const fc = [0.33, 0.36, 0.35];
+        rail(B, side, s0, s1, fo0, fo1, y0a, y0b, h + FENCE_V, 0, 0.035, fc, false);
+        rail(B, side, s0, s1, fo0, fo1, y0a, y0b, h + FENCE_V + FENCE_TOP, FENCE_LEAN, 0.035, fc);
         // posts (painted steel) every 4 m, from behind the rails up through the leaning top
         const sp = Math.ceil(s0 / POST_EVERY) * POST_EVERY;
         if (sp < s1) {

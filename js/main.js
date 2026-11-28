@@ -124,11 +124,14 @@ async function setup(M) {
   // shade table along the lap for the car's own sunlight
   setProgress(0.78, 'ld.monaco'); await nextFrame();
   const shadeT0 = performance.now();
-  const shade = M.shade.buildShade(track, sc.buildings, sc.groundAt, sc.sunDir, { maxGround: sc.groundMax });
+  const shade = M.shade.buildShade(track, sc.buildings.concat(sc.shadeExtra || []), sc.groundAt, sc.sunDir, { maxGround: sc.groundMax });
   {
     const shadeMeshes = [];
     tm.group.traverse((o) => { if (o.isMesh && ['ground', 'roadPaint', 'barriers', 'fence', 'roadDetail'].includes(o.name)) shadeMeshes.push(o); });
     M.shade.bakeShadeIntoMeshes(shadeMeshes, shade.shadeAt);
+    // the static sun shadow of the city (High / Medium); on Low the street life takes the baked
+    // shade table per instance instead
+    if (!sc.bakeShadow(renderer, scene)) sc.streetLife.applyShade(shade.shadeAt);
   }
   const carShade = M.shade.carShadeTable(track, shade.shadeAt);
   const shadeMs = performance.now() - shadeT0;

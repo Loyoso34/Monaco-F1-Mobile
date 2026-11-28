@@ -73,7 +73,11 @@ mesh, the scenery and the automated inspection all use this one corridor.
 * **Fairmont hotel:** one structure that follows the curve of the tunnel, with wings on the
   ground either side and a roof stepped in 20 m segments. All of its faces lie outside the
   tunnel cross-section.
-* **Palms:** trunks ≥ 1.2 m beyond any barrier, crowns ≥ 7 m above the road.
+* **Palms, trees and street furniture** (`js/streetlife.js`): everything on a pavement claims a
+  disc so lamps, palms, trees, signs, benches and stair heads never stand inside one another.
+  Canary palms (drooping fronds) only where their crown stays ≥ 4.8 m clear of the barriers,
+  Washingtonias (crown 12–18 m up) nearer; pavement trees are pruned crowns ≥ 2.45 m behind the
+  barrier line; nothing intrudes into the circuit below 5 m (checked per instance).
 * **Verification:** `node tools/inspect-circuit.mjs` checks the rendered triangles of every
   scenery object and the terrain against the corridor (see [TESTING.md](TESTING.md)).
 
@@ -127,13 +131,70 @@ Everything is built to the scale a driver judges distance by, and textured at th
   pavement; the car carries its own soft contact shadow (floor footprint and the four tyre
   patches), so it stays grounded in building shade and in the tunnel.
 * **Grandstands** are kept empty: concrete terraces with a row of red moulded seats on every
-  tread (0.5 m pitch, 8 m texture repeat with an aisle and yellow step nosings), front railing,
-  white canopy.
+  tread (0.5 m pitch, 8 m texture repeat with an aisle and yellow step nosings), side walls
+  following the rake, a sponsor fascia on a plinth along the front, front railing, and a white
+  canopy cantilevered over the seats from columns behind the back wall, with a fascia beam.
 * **Facade depth** (`js/city.js`): a recess mask drawn alongside the facade atlas marks every
   window, shopfront and arch. The facade shader carries the view ray to the opening's depth
   (tangent frame from screen-space derivatives, no extra vertex data): where it lands inside
   the opening the glass is drawn there, where it lands on wall it is the reveal, drawn in shade.
   Windows sit ~0.24 m into the walls and their reveals move as the car passes.
+
+## The city and its surroundings (2026 environment upgrade)
+
+**Light.** The sun never moves, so its shadow is rendered **once** at load into a depth map seen
+from the sun (`js/sunshadow.js`: orthographic, fitted round the circuit and the hills; 3,072² on
+High - ~0.56 m texels - and 2,048² on Medium). The buildings, landmarks, grandstands, bridges,
+trees, palm trunks and the hillside are its casters; the city, terrain, props and street furniture
+look it up per pixel with four hardware-filtered depth comparisons (bilinear PCF, a metric bias
+scaled with the slope to the sun, normal offset), skipped wherever the surface faces away from the
+sun. Facades fall into the shade of the block opposite, balconies and canopies shade the walls and
+seats below them, the Fairmont shades the slope beneath it - and nothing is re-rendered per frame.
+(The car keeps its real-time shadow; the road, kerbs, barriers and fences keep their baked shade.)
+The sky has fbm **cumulus** with shaded bases and thin cirrus.
+
+**Buildings** (`js/city.js`). Four more facade rows (slate mansards, dormers, a second tower
+style, a third Riviera style). **Mansard roofs** - slate slopes, a flat deck, soffit and cornice
+ring - on belle-époque blocks, many hotels and some Riviera blocks, with gabled **dormers** on the
+near buildings and 1–3 **chimneys** on tiled roofs. The facade shader adds render grain, a
+world-space macro tint (no two walls the same) and **sky reflections in the glass** only (Fresnel,
+masked to the openings), so windows read as glass from the cockpit.
+
+**Trackside** (`js/textures.js`, `js/trackmesh.js`). Kerbs with a rounded profile and an outer
+face; a 0.3 m **gutter** at the foot of the barriers where the run-off is wide enough; an AO band
+into the barrier foot. **Sponsors**: 16 fictional brands with their own marks (no real
+trademarks), drawn at 4 : 1 on 4 m × 1 m panels at 128 px/m - sharp, never stretched - in seven
+banner sets that change every 48 m, hemmed and eyeletted. Three **overhead footbridges** (deck
+underside 6.2 m above the road, banners on both faces, handrails, pylons to the ground) and
+**corner billboards** before the braking zones (8 m × 2 m on two posts, facing the road and turned
+25° to the approaching car, wholly behind the barrier line). Tecpro blocks with a moulded profile.
+**Catch fences** gain a knee rail and a top rail on the posts (only the faces the driver sees).
+
+**Street life** (`js/streetlife.js`): instanced per 640 m tile along the circuit (frustum-culled
+by tile); the hillside trees are one instanced mesh per species (a handful of draw calls for
+~1,500 trees on High). Trees, shrubs, flags, signs, furniture, balustrades, stairs and the
+mountains are drawn by the main camera only - the rear-view mirrors keep the road, barriers,
+buildings, palms and streetlights:
+
+| | |
+|---|---|
+| Palms | Canary date palms (stout trunk with the leaf-base pattern, a full crown of V-folded fronds in three tiers) and Washingtonias (slender, 12–18 m): harbour, start straight, Sainte Dévote, Casino, pool, Rascasse, Mirabeau |
+| Trees | umbrella pines, cypresses and broadleaf trees on the hillsides and in the gardens (≤ 1,500 on High, 800 Medium, 260 Low), placed from the same green field that colours the terrain; a detailed crown within 230 m of the circuit, a coarse one beyond (chosen per tree at build time - no popping); lumpy crowns with a leaf-cluster texture; pruned trees on the pavements of the climb, clipped shrubs at the Casino, Sainte Dévote and Portier |
+| Streetlights | 130 boulevard lamps (dark cast metal, an arm reaching over the road, a pale diffuser), both sides every 30–36 m |
+| Signs | French / Monegasque road signs (no entry, keep right, give way, crossing, 50, parking, no stopping) on galvanised poles facing the traffic; white direction boards before the big junctions |
+| Furniture | cast-iron benches with timber slats and litter bins on the harbour quays and the wide pavements of the climb; Monaco flags on the quays |
+| Balustrades | white stone balustrades (raked plinth and rail, turned balusters, a pedestal per 2.4 m bay) along the pavement edges above retaining walls, following the curve and slope |
+| Stairs | public stairways down from the pavement to the lower streets, with parapet walls and hand rails |
+
+**Places.** The **swimming pool** has lane lines, an edge coping and a diving tower; round
+**Casino Square**, raised lawns with stone kerbs and flower beds wherever the ground beyond the
+pavements is free (a fountain is placed too when a 7 m spot is free).
+
+**Harbour water**: three normal-map scales blended (no visible repeat), low roughness, so it
+mirrors the sky and the yachts. **Mountains**: two ridges, pre-shaded from the sun and pre-hazed -
+the limestone wall of the Tête de Chien / Mont Agel ~2.5 km inland (grey cliffs and screes over
+maquis and pines, villages on the lower slopes) running down into the sea as headlands at both
+ends, and a paler Alpine ridge ~4.5 km behind it.
 
 ## The tunnel
 

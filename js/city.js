@@ -20,10 +20,11 @@
 //   'hotel'  - glass and white bands (the large seafront hotels)
 import * as THREE from 'three';
 
-const ROWS = 16, TW = 1024, TH = 2048, RH = TH / ROWS, BAYS = 8;      // 8 bays per strip
+const ROWS = 20, TW = 1024, TH = 2560, RH = TH / ROWS, BAYS = 8;      // 8 bays per strip
 export const ROW = {
   belle: 0, belleAttic: 1, rivA: 2, rivB: 3, modern: 4, tower: 5, old: 6, hotel: 7,
   shop: 8, belleBase: 9, cafe: 10, plain: 11, tiles: 12, flat: 13, awning: 14, stone: 15,
+  slate: 16, dormer: 17, towerB: 18, rivC: 19,
 };
 
 function rng(seed) { let s = seed >>> 0; return () => ((s = (s * 1664525 + 1013904223) >>> 0) / 4294967296); }
@@ -213,6 +214,43 @@ export function makeFacadeAtlas() {
   for (let yy = 0; yy < RH; yy += 21) for (let xx = (yy / 21) % 2 * 18; xx < TW; xx += 38) {
     const t = R(); x.fillStyle = `rgb(${190 + t * 30},${178 + t * 26},${148 + t * 22})`; x.fillRect(xx + 1, rowY(ROW.stone) + yy + 1, 35, 19);
   }
+  // 16 slate / zinc mansard roof: overlapping courses of dark blue-grey slates
+  x.fillStyle = '#5d6570'; x.fillRect(0, rowY(ROW.slate), TW, RH);
+  for (let yy = 0; yy < RH; yy += 9) for (let xx = (yy / 9) % 2 * 9; xx < TW; xx += 18) {
+    const t = R(); x.fillStyle = `rgb(${84 + t * 26},${92 + t * 26},${104 + t * 26})`; x.fillRect(xx, rowY(ROW.slate) + yy, 16, 8);
+    x.fillStyle = 'rgba(0,0,0,0.28)'; x.fillRect(xx, rowY(ROW.slate) + yy + 7, 16, 2);
+  }
+  // 17 dormer: a tall attic window in a white stone surround on slate (one per bay)
+  x.fillStyle = '#5d6570'; x.fillRect(0, rowY(ROW.dormer), TW, RH);
+  for (let i = 0; i < BAYS; i++) {
+    const ox = bay(i), oy = rowY(ROW.dormer);
+    x.fillStyle = '#ece4d2'; x.fillRect(ox + 22, oy + 8, 84, 120);
+    x.fillStyle = 'rgba(0,0,0,0.25)'; x.fillRect(ox + 22, oy + 8, 84, 6);
+    windowAt(ox + 34, oy + 24, 60, 92, { frame: '#f4efe4' });
+  }
+  // 18 tower with balconies: a white slab band and glass balustrade on every floor, deep glazing
+  wall(ROW.towerB, '#f1f0ec');
+  for (let i = 0; i < BAYS; i++) {
+    const ox = bay(i), oy = rowY(ROW.towerB);
+    x.fillStyle = 'rgba(25,25,28,0.6)'; x.fillRect(ox, oy + 6, B, 88);
+    recess(ox, oy + 7, B, 86);
+    glass(ox + 4, oy + 10, B - 8, 80, 15);
+    x.fillStyle = '#cfd0cc'; for (let k = 6; k < B; k += 42) x.fillRect(ox + k, oy + 10, 3, 80);
+    x.fillStyle = 'rgba(190,215,230,0.55)'; x.fillRect(ox, oy + 66, B, 28);          // glass balustrade
+    x.fillStyle = 'rgba(255,255,255,0.7)'; x.fillRect(ox, oy + 64, B, 3);
+    x.fillStyle = '#fafaf7'; x.fillRect(ox, oy + 94, B, 22);                          // slab edge
+    x.fillStyle = 'rgba(0,0,0,0.22)'; x.fillRect(ox, oy + 116, B, 6);
+  }
+  // 19 riviera floor with French windows, wrought-iron balconettes and flower boxes
+  wall(ROW.rivC, '#f6efe2'); grain(ROW.rivC, 0.06);
+  for (let i = 0; i < BAYS; i++) {
+    const ox = bay(i), oy = rowY(ROW.rivC);
+    const sc = i % 2 ? '#5f7a52' : '#8a6a4c';
+    windowAt(ox + 40, oy + 12, 48, 96, { sill: false });
+    shutters(ox + 40, oy + 12, 48, 96, sc, true);
+    railing(ox + 34, oy + 80, 60, 26, '#26282b');
+    for (let k = 0; k < 9; k++) { x.fillStyle = ['#c8324a', '#e86a8a', '#f0f0f0', '#4f8a3c'][k % 4]; x.beginPath(); x.arc(ox + 38 + k * 6.5, oy + 78 - (k % 2) * 2, 3, 0, Math.PI * 2); x.fill(); }
+  }
   const tex = new THREE.CanvasTexture(cv);
   tex.colorSpace = THREE.SRGBColorSpace;
   tex.wrapS = THREE.RepeatWrapping; tex.wrapT = THREE.ClampToEdgeWrapping;
@@ -221,6 +259,12 @@ export function makeFacadeAtlas() {
   const rt = new THREE.CanvasTexture(mc);
   rt.wrapS = THREE.RepeatWrapping; rt.wrapT = THREE.ClampToEdgeWrapping; rt.anisotropy = 4;
   tex.userData.recess = rt;
+  // glass mask for reflections (white = window / shopfront glass): the recess mask inverted
+  const gc = document.createElement('canvas'); gc.width = TW; gc.height = TH;
+  const gx = gc.getContext('2d'); gx.filter = 'none'; gx.drawImage(mc, 0, 0);
+  { const im = gx.getImageData(0, 0, TW, TH), d = im.data; for (let i = 0; i < d.length; i += 4) { const v = d[i] < 150 ? 255 - d[i] * 1.2 : 0; d[i] = d[i + 1] = d[i + 2] = Math.max(0, v); d[i + 3] = 255; } gx.putImageData(im, 0, 0); }
+  const gt = new THREE.CanvasTexture(gc); gt.wrapS = THREE.RepeatWrapping; gt.wrapT = THREE.ClampToEdgeWrapping;
+  tex.userData.glass = gt;
   return tex;
 }
 
@@ -345,7 +389,9 @@ export class CityBuilder {
     const nUp = Math.max(1, Math.round((yTop0 - y0 - gH) / fh));
     const yTop = y0 + gH + nUp * fh;
     const bayM = st === 'belle' ? 3.9 : st === 'modern' ? 4.2 : st === 'hotel' ? 3.6 : st === 'old' ? 3.0 : 3.4;
-    const upRow = st === 'belle' ? ROW.belle : st === 'riviera' ? (R() < 0.5 ? ROW.rivA : ROW.rivB) : st === 'old' ? ROW.old : st === 'hotel' ? ROW.hotel : (b.h > 45 && R() < 0.5 ? ROW.tower : ROW.modern);
+    const rr = R();
+    const upRow = st === 'belle' ? ROW.belle : st === 'riviera' ? (rr < 0.36 ? ROW.rivA : rr < 0.68 ? ROW.rivB : ROW.rivC) : st === 'old' ? ROW.old : st === 'hotel' ? ROW.hotel
+      : (b.h > 40 ? (rr < 0.4 ? ROW.tower : rr < 0.8 ? ROW.towerB : ROW.modern) : (rr < 0.35 ? ROW.towerB : ROW.modern));
     const groundRow = !b.near ? upRow : st === 'belle' ? ROW.belleBase : st === 'old' ? ROW.old : (R() < 0.35 ? ROW.cafe : ROW.shop);
     // corners: face k runs from corner k to corner k+1 (outward normal)
     const C = [[-hw, -hd], [hw, -hd], [hw, hd], [-hw, hd]];
@@ -382,7 +428,54 @@ export class CityBuilder {
     }
     // ---- roof ----
     const roofTiles = (st === 'riviera' || st === 'old') && b.h < 32 && R() < 0.8;
-    if (roofTiles) {
+    // Monte-Carlo's belle-epoque blocks (and some hotels / riviera houses) carry a slate or zinc
+    // mansard: a steep lower slope with dormer windows, a shallow upper deck
+    const mansard = !roofTiles && b.h < 70 && Math.min(b.w, b.dpt) > 9 && (st === 'belle' || (st === 'hotel' && R() < 0.35) || (st === 'riviera' && R() < 0.3));
+    if (mansard) {
+      const eave = 0.35, inset = 1.5, mh = 3.3;
+      const ex = hw + eave, ez = hd + eave, ix = hw - inset, iz = hd - inset;
+      const E = [P(-ex, yTop, -ez), P(ex, yTop, -ez), P(ex, yTop, ez), P(-ex, yTop, ez)];
+      const Tq = [P(-ix, yTop + mh, -iz), P(ix, yTop + mh, -iz), P(ix, yTop + mh, iz), P(-ix, yTop + mh, iz)];
+      const [v0, v1] = vRow(ROW.slate);
+      const slateC = new THREE.Color(0xffffff);
+      for (let k = 0; k < 4; k++) {
+        const L = (k % 2 === 0 ? b.w : b.dpt) / 8;
+        this.quad(bk, E[k], E[(k + 1) % 4], Tq[k], Tq[(k + 1) % 4], 0, L, v0, v1, slateC, [1, 0.9, 0.82, 0.95][k]);
+      }
+      this.quad(bk, Tq[0], Tq[1], Tq[3], Tq[2], 0, b.w / 16, v0, v0 + (v1 - v0) * 0.3, slateC, 1.05);
+      // the eave soffit and the cornice under it
+      const S = [P(-hw, yTop, -hd), P(hw, yTop, -hd), P(hw, yTop, hd), P(-hw, yTop, hd)];
+      const [s0, s1] = vRow(ROW.plain);
+      for (let k = 0; k < 4; k++) this.quad(bk, E[(k + 1) % 4], E[k], S[(k + 1) % 4], S[k], 0, 0.05, s0, s1, col, 0.45);
+      this.ring(b, yTop - 0.65, 0.65, 0.40, col, 0.9);
+      // dormers (near the circuit): a window in a stone surround standing on the slope, gabled
+      if (b.near) {
+        const dbk = this._bucket(b.cx, b.cz, true);
+        const [dv0, dv1] = vRow(ROW.dormer);
+        for (const f of faces) {
+          const nb = Math.max(1, Math.round(f.len / bayM));
+          for (let i = 0; i < nb; i++) {
+            if (nb > 2 && (i === 0 || i === nb - 1)) continue;
+            const a = (i + 0.5) / nb * f.len, w2 = Math.min(1.5, f.len / nb * 0.42);
+            const out = eave - inset * 0.38, y1 = yTop + 0.35, y2 = yTop + 2.2, yR = y2 + 0.7;
+            const fp = (aa, yy, o) => this._facePoint(b, f, aa, yy, o);
+            const q0 = fp(a - w2, y1, out), q1 = fp(a + w2, y1, out), q2 = fp(a - w2, y2, out), q3 = fp(a + w2, y2, out);
+            const u0 = (i % BAYS) / BAYS, u1 = u0 + 1 / BAYS;
+            this.quad(dbk, q0, q1, q2, q3, u0, u1, dv0, dv1, col, 1);
+            // side cheeks back into the slope and a small gabled roof
+            const back = -inset * 0.9;
+            const c0 = fp(a - w2, y2, back), c1 = fp(a + w2, y2, back), c0b = fp(a - w2, y1 + 1.0, back), c1b = fp(a + w2, y1 + 1.0, back);
+            this.quad(dbk, c0b, q0, c0, q2, 0, 0.02, v0, v1, slateC, 0.7);
+            this.quad(dbk, q1, c1b, q3, c1, 0, 0.02, v0, v1, slateC, 0.7);
+            const r0 = fp(a, yR, out + 0.1), r1 = fp(a, yR, back);
+            const e0 = fp(a - w2 - 0.12, y2, out + 0.1), e1 = fp(a + w2 + 0.12, y2, out + 0.1), e0b = fp(a - w2 - 0.12, y2, back), e1b = fp(a + w2 + 0.12, y2, back);
+            this.quad(dbk, e0, r0, e0b, r1, 0, 0.1, v0, v1, slateC, 0.9);
+            this.quad(dbk, r0, e1, r1, e1b, 0, 0.1, v0, v1, slateC, 0.8);
+            this.tri(dbk, e0, e1, r0, [0, s0], [0.02, s0], [0.01, s1], col, 0.95);
+          }
+        }
+      }
+    } else if (roofTiles) {
       // hip roof: ridge along the longer axis, 28 deg pitch, small eaves overhang
       const eave = 0.45, long = b.w >= b.dpt;
       const ex = hw + eave, ez = hd + eave;
@@ -410,6 +503,13 @@ export class CityBuilder {
       const S = [P(-hw, yTop, -hd), P(hw, yTop, -hd), P(hw, yTop, hd), P(-hw, yTop, hd)];
       const [s0, s1] = vRow(ROW.plain);
       for (let k = 0; k < 4; k++) this.quad(bk, E[(k + 1) % 4], E[k], S[(k + 1) % 4], S[k], 0, 0.05, s0, s1, col, 0.45);
+      // chimney stacks rising through the tiles near the ridge
+      const nCh = 1 + Math.floor(R() * 3);
+      for (let i = 0; i < nCh; i++) {
+        const ta = (R() - 0.5) * (long ? 2 * rl : hw), td = (R() - 0.5) * (long ? hd * 0.5 : 2 * rl);
+        const cw = 0.7 + R() * 0.4, ch = rise * 0.6 + 1.3 + R() * 0.8;
+        this.box(b.cx + sa * ta + ca * td, yTop + rise * 0.35, b.cz + ca * ta - sa * td, b.ang, cw, ch, cw, col.clone().multiplyScalar(0.92), { row: ROW.plain, detail: !b.near ? false : false });
+      }
     } else {
       // flat roof inside a parapet, plant rooms / lift housing on top
       const [v0, v1] = vRow(ROW.flat);
@@ -554,4 +654,49 @@ export class CityBuilder {
     }
     return out;
   }
+}
+
+// Facade detail shader (chained after addFacadeRecess):
+// * window glass reflects the sky - a gradient from a bright hazy horizon to the deep zenith by
+//   the reflected view direction, plus the street / opposite facades below the horizon - weighted
+//   by Fresnel (strong at the grazing angles a driver sees facades at) and masked to the glass;
+// * fine plaster / stone grain at ~0.6 m and a soft large-scale tint (weathering, repainted
+//   floors) from world position, so a long facade never reads as one flat colour.
+export function addFacadeDetail(material, glassMap, grainMap) {
+  const prev = material.onBeforeCompile;
+  material.onBeforeCompile = (sh, r) => {
+    if (prev) prev.call(material, sh, r);
+    sh.uniforms.glassMap = { value: glassMap };
+    sh.uniforms.grainMap = { value: grainMap };
+    sh.vertexShader = sh.vertexShader
+      .replace('void main() {', 'varying vec3 vCityW;\nvoid main() {')
+      .replace('#include <project_vertex>', '#include <project_vertex>\n  vCityW = ( modelMatrix * vec4( transformed, 1.0 ) ).xyz;');
+    sh.fragmentShader = sh.fragmentShader
+      .replace('void main() {', 'uniform sampler2D glassMap;\nuniform sampler2D grainMap;\nvarying vec3 vCityW;\nvoid main() {')
+      .replace('#include <color_fragment>', `#include <color_fragment>
+      {
+        float gr = texture2D( grainMap, vec2( vMapUv.x * 24.0, vMapUv.y * 40.0 ) ).r;
+        vec2 cw = vCityW.xz * 0.045 + vec2( vCityW.y * 0.08, 0.0 );
+        float mac = sin( cw.x ) * sin( cw.y * 1.3 + 1.7 ) * 0.5 + 0.5;
+        diffuseColor.rgb *= ( 0.94 + 0.12 * gr ) * ( 0.95 + 0.08 * mac );
+      }`)
+      .replace('#include <opaque_fragment>', `{
+        float gm = texture2D( glassMap, vMapUv ).r;
+        if ( gm > 0.02 ) {
+          vec3 Vv = normalize( vViewPosition );
+          vec3 Rw = inverseTransformDirection( reflect( -Vv, normal ), viewMatrix );
+          float y = Rw.y;
+          vec3 sky = mix( vec3( 0.62, 0.70, 0.78 ), vec3( 0.20, 0.36, 0.66 ), smoothstep( 0.02, 0.6, y ) );
+          vec3 street = vec3( 0.30, 0.29, 0.27 );
+          vec3 refl = mix( street, sky, smoothstep( -0.08, 0.06, y ) );
+          float ndv = clamp( dot( normal, Vv ), 0.0, 1.0 );
+          float fres = 0.08 + 0.72 * pow( 1.0 - ndv, 3.0 );
+          outgoingLight = mix( outgoingLight, refl, gm * fres );
+        }
+      }
+      #include <opaque_fragment>`);
+  };
+  const key = material.customProgramCacheKey ? material.customProgramCacheKey.bind(material) : null;
+  material.customProgramCacheKey = () => (key ? key() : '') + '|facadeDetail';
+  material.needsUpdate = true;
 }

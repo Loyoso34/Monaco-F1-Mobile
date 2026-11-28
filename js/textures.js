@@ -275,42 +275,89 @@ function bolt(x, cx, cy, rad) {
   x.fillStyle = 'rgba(240,242,244,0.55)'; x.beginPath(); x.arc(cx - rad * 0.3, cy - rad * 0.35, rad * 0.45, 0, Math.PI * 2); x.fill();
 }
 
-// Advertising banners stretched over the barriers (generic names, no real brands). One tile =
-// 16 m x 1.10 m = four 4 m panels on a 1024 x 128 canvas: the artwork is drawn 0.55x wide so
-// it keeps its proportions on the 4 m x 1.1 m panel (64 px/m along, 116 px/m up).
-const AD_SETS = [
-  [['#0b2a5b', '#ffffff', 'MONTE-CARLO', 'bar'], ['#ffffff', '#c8102e', 'GRAND PRIX', 'chev'], ['#c8102e', '#ffffff', 'RIVIERA', 'dot'], ['#101010', '#ffc20e', 'HERCULE MARINE', 'bar']],
-  [['#00704a', '#ffffff', 'AZUR', 'dot'], ['#f2f2f2', '#0b2a5b', 'PRINCIPAUTÉ', 'bar'], ['#202a44', '#ffffff', 'NOVA', 'chev'], ['#ffc20e', '#101010', 'SOLARIS', 'dot']],
-  [['#e10b2a', '#ffffff', 'VELOCE', 'chev'], ['#111418', '#ffffff', 'CORSA', 'bar'], ['#ffffff', '#00704a', 'AZURA', 'dot'], ['#0b2a5b', '#ffc20e', 'MONACO 2024', 'chev']],
+// Trackside sponsors: fictional brands (no real trademarks), each a logo mark + wordmark on its
+// own colours, drawn crisply at the panel's true proportions (4 : 1, one panel = 4 m x 1 m on a
+// banner, 128 px per metre). drawSponsor() paints one panel into any canvas rect; the same art
+// is used on the barrier banners, the overhead bridges, billboards and facade banners.
+export const SPONSORS = [
+  { name: 'AZURA', bg: ['#0a6f86', '#0c5568'], fg: '#ffffff', mark: 'wave', italic: true },
+  { name: 'VELOCE', bg: ['#e10b2a', '#b3081f'], fg: '#ffffff', mark: 'speed', italic: true },
+  { name: 'MONTE-CARLO', bg: ['#0b1f45', '#0b1f45'], fg: '#d8b45a', mark: 'crown', serif: true },
+  { name: 'SOLARIS', bg: ['#ffc20e', '#f3a712'], fg: '#16181c', mark: 'sun', italic: true },
+  { name: 'NOVA AIR', bg: ['#14306b', '#0d2150'], fg: '#ffffff', mark: 'star' },
+  { name: 'CORSA', bg: ['#111317', '#111317'], fg: '#ffffff', accent: '#e10b2a', mark: 'chevron', italic: true },
+  { name: 'PRINCIPAUTÉ', bg: ['#ffffff', '#eceff2'], fg: '#c8102e', mark: 'diamond', serif: true },
+  { name: 'HERCULE MARINE', bg: ['#08284a', '#08284a'], fg: '#ffffff', accent: '#3fb6e8', mark: 'wave' },
+  { name: 'LUMEN', bg: ['#0f3b2c', '#0b2c21'], fg: '#e8c977', mark: 'crown', serif: true },
+  { name: 'RIVIERA', bg: ['#f4f4f2', '#f4f4f2'], fg: '#1d4f9c', accent: '#e10b2a', mark: 'bars', italic: true },
+  { name: 'APEX', bg: ['#16181c', '#16181c'], fg: '#ffc20e', mark: 'apex', italic: true },
+  { name: 'GRAND PRIX', bg: ['#c8102e', '#c8102e'], fg: '#ffffff', mark: 'flag', italic: true },
+  { name: 'MONACO 2024', bg: ['#ffffff', '#ffffff'], fg: '#c8102e', accent: '#111317', mark: 'flag', italic: true },
+  { name: 'ORBIT', bg: ['#2b2f8f', '#1c1f66'], fg: '#ffffff', accent: '#7fd3ff', mark: 'ring' },
+  { name: 'TERRA', bg: ['#2f6b3a', '#24552d'], fg: '#ffffff', mark: 'leaf', italic: true },
+  { name: 'QUANTA', bg: ['#f05a28', '#d8481a'], fg: '#ffffff', mark: 'ring', italic: true },
 ];
+export function drawSponsor(x, i, X, Y, W, H) {
+  const sp = SPONSORS[i % SPONSORS.length];
+  x.save();
+  x.beginPath(); x.rect(X, Y, W, H); x.clip();
+  const g = x.createLinearGradient(X, Y, X, Y + H); g.addColorStop(0, sp.bg[0]); g.addColorStop(1, sp.bg[1]);
+  x.fillStyle = g; x.fillRect(X, Y, W, H);
+  const fg = sp.fg, ac = sp.accent || sp.fg;
+  // logo mark at the left third, wordmark after it - the group centred on the panel
+  x.font = `${sp.italic ? 'italic ' : ''}${sp.serif ? '700' : '900'} ${Math.round(H * 0.52)}px ${sp.serif ? 'Georgia, "Times New Roman", serif' : '"Helvetica Neue", "Arial Black", Arial, sans-serif'}`;
+  x.textBaseline = 'middle'; x.textAlign = 'left';
+  let tw = x.measureText(sp.name).width;
+  const mw = H * 0.62, gap = H * 0.22, maxW = W * 0.86;
+  const k = Math.min(1, (maxW - mw - gap) / tw); tw *= k;
+  const x0 = X + (W - (mw + gap + tw)) / 2, cy = Y + H / 2, mx = x0 + mw / 2, mr = H * 0.29;
+  x.fillStyle = ac; x.strokeStyle = ac; x.lineWidth = H * 0.07; x.lineCap = 'round'; x.lineJoin = 'round';
+  switch (sp.mark) {
+    case 'wave': for (let j = 0; j < 3; j++) { x.beginPath(); const yy = cy - mr * 0.6 + j * mr * 0.6; x.moveTo(mx - mr, yy); x.bezierCurveTo(mx - mr * 0.4, yy - mr * 0.5, mx - mr * 0.1, yy + mr * 0.5, mx + mr, yy - mr * 0.1); x.stroke(); } break;
+    case 'speed': for (let j = 0; j < 3; j++) { x.fillRect(mx - mr + j * mr * 0.25, cy - mr * 0.7 + j * mr * 0.5, mr * 1.6 - j * mr * 0.4, mr * 0.28); } break;
+    case 'crown': x.beginPath(); x.moveTo(mx - mr, cy + mr * 0.6); x.lineTo(mx - mr, cy - mr * 0.2); x.lineTo(mx - mr * 0.5, cy + mr * 0.15); x.lineTo(mx, cy - mr * 0.7); x.lineTo(mx + mr * 0.5, cy + mr * 0.15); x.lineTo(mx + mr, cy - mr * 0.2); x.lineTo(mx + mr, cy + mr * 0.6); x.closePath(); x.fill(); break;
+    case 'sun': x.beginPath(); x.arc(mx, cy, mr * 0.55, 0, Math.PI * 2); x.fill(); for (let j = 0; j < 12; j++) { const a = j / 12 * Math.PI * 2; x.beginPath(); x.moveTo(mx + Math.cos(a) * mr * 0.75, cy + Math.sin(a) * mr * 0.75); x.lineTo(mx + Math.cos(a) * mr * 1.05, cy + Math.sin(a) * mr * 1.05); x.stroke(); } break;
+    case 'star': x.beginPath(); for (let j = 0; j < 10; j++) { const a = -Math.PI / 2 + j * Math.PI / 5, rr = j % 2 ? mr * 0.42 : mr; x.lineTo(mx + Math.cos(a) * rr, cy + Math.sin(a) * rr); } x.closePath(); x.fill(); break;
+    case 'chevron': x.fillStyle = sp.accent; for (let j = 0; j < 2; j++) { const ox = mx - mr * 0.9 + j * mr * 0.75; x.beginPath(); x.moveTo(ox, cy - mr); x.lineTo(ox + mr * 0.7, cy); x.lineTo(ox, cy + mr); x.lineTo(ox + mr * 0.35, cy + mr); x.lineTo(ox + mr * 1.05, cy); x.lineTo(ox + mr * 0.35, cy - mr); x.closePath(); x.fill(); } break;
+    case 'diamond': x.beginPath(); x.moveTo(mx, cy - mr); x.lineTo(mx + mr * 0.8, cy); x.lineTo(mx, cy + mr); x.lineTo(mx - mr * 0.8, cy); x.closePath(); x.fill(); x.fillStyle = sp.bg[0]; x.fillRect(mx - mr, cy, mr * 2, mr); x.strokeStyle = fg; x.lineWidth = H * 0.035; x.beginPath(); x.moveTo(mx, cy - mr); x.lineTo(mx + mr * 0.8, cy); x.lineTo(mx, cy + mr); x.lineTo(mx - mr * 0.8, cy); x.closePath(); x.stroke(); break;
+    case 'bars': x.fillStyle = sp.accent; x.fillRect(mx - mr, cy - mr * 0.8, mr * 0.45, mr * 1.6); x.fillStyle = fg; x.fillRect(mx - mr * 0.35, cy - mr * 0.8, mr * 0.45, mr * 1.6); x.fillRect(mx + mr * 0.3, cy - mr * 0.8, mr * 0.45, mr * 1.6); break;
+    case 'apex': x.beginPath(); x.moveTo(mx - mr, cy + mr * 0.8); x.lineTo(mx, cy - mr * 0.9); x.lineTo(mx + mr, cy + mr * 0.8); x.lineTo(mx + mr * 0.45, cy + mr * 0.8); x.lineTo(mx, cy - mr * 0.05); x.lineTo(mx - mr * 0.45, cy + mr * 0.8); x.closePath(); x.fill(); break;
+    case 'flag': { const s2 = mr * 0.42; for (let a = 0; a < 4; a++) for (let b = 0; b < 4; b++) { x.fillStyle = (a + b) % 2 ? (sp.accent || '#111317') : fg; x.fillRect(mx - mr * 0.85 + a * s2, cy - mr * 0.85 + b * s2, s2, s2); } break; }
+    case 'ring': x.beginPath(); x.arc(mx, cy, mr * 0.8, 0, Math.PI * 2); x.stroke(); x.beginPath(); x.ellipse(mx, cy, mr * 1.15, mr * 0.38, -0.4, 0, Math.PI * 2); x.stroke(); break;
+    case 'leaf': x.beginPath(); x.moveTo(mx - mr, cy + mr * 0.8); x.quadraticCurveTo(mx - mr, cy - mr, mx + mr, cy - mr * 0.9); x.quadraticCurveTo(mx + mr * 0.6, cy + mr * 0.8, mx - mr, cy + mr * 0.8); x.fill(); break;
+  }
+  x.fillStyle = fg;
+  x.save(); x.translate(x0 + mw + gap, cy + H * 0.03); x.scale(k, 1); x.fillText(sp.name, 0, 0); x.restore();
+  // thin keyline at the panel edges (the banner seams)
+  x.fillStyle = 'rgba(0,0,0,0.25)'; x.fillRect(X, Y, 2, H); x.fillRect(X + W - 2, Y, 2, H);
+  x.restore();
+}
+// atlas of every sponsor panel (4 columns x 8 rows of 512 x 128 px) for bridges, billboards and
+// facade banners; sponsorUV(i) gives the panel's uv rect
+export function sponsorAtlas() {
+  const W = 2048, H = 1024, c = canvas(W, H), x = c.getContext('2d');
+  for (let i = 0; i < 32; i++) drawSponsor(x, i, (i % 4) * 512, Math.floor(i / 4) * 128, 512, 128);
+  const t = tex(c, { repeat: false, aniso: 8 });
+  t.wrapS = t.wrapT = THREE.ClampToEdgeWrapping;
+  return t;
+}
+export const sponsorUV = (i) => { const col = i % 4, row = Math.floor(i / 4) % 8; return [col / 4 + 0.002, 1 - (row + 1) / 8 + 0.004, (col + 1) / 4 - 0.002, 1 - row / 8 - 0.004]; };
+
+// Banners stretched over the barriers: two 4 m panels per 1024 px row (128 px / m), between a
+// top and bottom hem with eyelets, as wide as the rails behind them (-0.05 .. 1.05 m tall row).
 export function adWall(set = 0) {
   const W = 1024, H = 128, c = canvas(W, H), x = c.getContext('2d');
-  const ads = AD_SETS[set % AD_SETS.length];
-  const w = W / 4, top = ARMCO_Y(1.03), bot = ARMCO_Y(0.06);
+  const top = ARMCO_Y(1.03), bot = ARMCO_Y(0.06);
   x.fillStyle = '#2c2f33'; x.fillRect(0, 0, W, H);                 // gap under the banner
-  for (let i = 0; i < 4; i++) {
-    const [bg, fg, t, mark] = ads[i];
-    const x0 = i * w;
-    x.fillStyle = bg; x.fillRect(x0, top, w, bot - top);
-    // a simple graphic device beside the name (stripes / chevron / disc)
-    x.save(); x.translate(x0 + w / 2, (top + bot) / 2); x.scale(0.55, 1);
-    x.fillStyle = fg;
-    let tw;
-    x.font = 'italic 900 58px "Helvetica Neue", "Arial Black", Arial, sans-serif'; x.textAlign = 'center'; x.textBaseline = 'middle';
-    tw = Math.min(x.measureText(t).width, (w - 40) / 0.55 - 70);
-    const k = tw / x.measureText(t).width;
-    if (mark === 'bar') { x.fillRect(-tw / 2 - 52, -22, 12, 44); x.fillRect(-tw / 2 - 34, -22, 12, 44); }
-    else if (mark === 'chev') { x.beginPath(); x.moveTo(-tw / 2 - 58, -24); x.lineTo(-tw / 2 - 30, 0); x.lineTo(-tw / 2 - 58, 24); x.lineTo(-tw / 2 - 44, 24); x.lineTo(-tw / 2 - 16, 0); x.lineTo(-tw / 2 - 44, -24); x.closePath(); x.fill(); }
-    else { x.beginPath(); x.arc(-tw / 2 - 36, 0, 18, 0, Math.PI * 2); x.fill(); }
-    x.save(); x.translate(14, 4); x.scale(k, 1); x.fillText(t, 0, 0); x.restore();
-    x.restore();
-    // banner hem and the eyelets that tie it to the rails
-    x.fillStyle = 'rgba(0,0,0,0.22)'; x.fillRect(x0, top, w, 2); x.fillRect(x0, bot - 2, w, 2); x.fillRect(x0 + w - 2, top, 2, bot - top);
-    for (let e = 8; e < w; e += 32) { x.fillStyle = 'rgba(210,212,215,0.9)'; x.fillRect(x0 + e, top + 3, 2, 2); x.fillRect(x0 + e, bot - 5, 2, 2); }
+  for (let i = 0; i < 2; i++) {
+    const x0 = i * 512;
+    drawSponsor(x, set * 2 + i, x0, top, 512, bot - top);
+    for (let e = 10; e < 512; e += 40) { x.fillStyle = 'rgba(215,218,222,0.95)'; x.fillRect(x0 + e, top + 3, 3, 3); x.fillRect(x0 + e, bot - 6, 3, 3); }
+    x.fillStyle = 'rgba(0,0,0,0.25)'; x.fillRect(x0, top, 512, 2); x.fillRect(x0, bot - 2, 512, 2);
   }
-  // dirt at the foot
+  // road grime at the foot of the banner
   const grime = x.createLinearGradient(0, ARMCO_Y(0.4), 0, bot);
-  grime.addColorStop(0, 'rgba(60,55,48,0)'); grime.addColorStop(1, 'rgba(60,55,48,0.30)');
+  grime.addColorStop(0, 'rgba(60,55,48,0)'); grime.addColorStop(1, 'rgba(60,55,48,0.28)');
   x.fillStyle = grime; x.fillRect(0, ARMCO_Y(0.4), W, bot - ARMCO_Y(0.4));
   return tex(c);
 }
@@ -515,13 +562,14 @@ export function skyGradient() {
 
 // One atlas for all barrier faces (one material per chunk): eight 128 px rows, each tiling
 // horizontally. 'flat' is a plain light row for posts, frames and caps (tinted by vertex colour).
-export const BARRIER_ROWS = { armco: 0, ads: 1, tecpro: 2, wall: 3, flat: 4, ads2: 5, tunnel: 6, ads3: 7 };
-export const BARRIER_NROWS = 8;
+export const BARRIER_ROWS = { armco: 0, ads: 1, tecpro: 2, wall: 3, flat: 4, ads2: 5, tunnel: 6, ads3: 7, ads4: 8, ads5: 9, ads6: 10, ads7: 11 };
+export const AD_ROWS = ['ads', 'ads2', 'ads3', 'ads4', 'ads5', 'ads6', 'ads7'];
+export const BARRIER_NROWS = 12;
 export const barrierRowV = (row, inset = 0.003) => [1 - (row + 1) / BARRIER_NROWS + inset, 1 - row / BARRIER_NROWS - inset];
 export function barrierAtlas() {
   const W = 1024, RH = 128, c = canvas(W, RH * BARRIER_NROWS), x = c.getContext('2d');
   const flat = canvas(64, 128), fx = flat.getContext('2d'); fx.fillStyle = '#e8e8e8'; fx.fillRect(0, 0, 64, 128);
-  const rows = [armco().image, adWall(0).image, tecpro().image, concrete(256, 170).image, flat, adWall(1).image, tunnelWall().image, adWall(2).image];
+  const rows = [armco().image, adWall(0).image, tecpro().image, concrete(256, 170).image, flat, adWall(1).image, tunnelWall().image, adWall(2).image, adWall(3).image, adWall(4).image, adWall(5).image, adWall(6).image];
   rows.forEach((img, i) => {
     for (let ox = 0; ox < W; ox += img.width * (RH / img.height)) x.drawImage(img, ox, i * RH, img.width * (RH / img.height), RH);
   });

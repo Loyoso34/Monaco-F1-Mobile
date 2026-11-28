@@ -22,6 +22,9 @@ export const VIEWS = {
   'start-straight-chase': { car: { at: 'spawn', d: 'spawn' }, cam: 'chase' },
   'start-straight-high': { from: ['spawn', -30, 4, 14], to: ['spawn', 120, 0, 2], fov: 60 },
   // the previous start position (55 m before the line) for before / after comparisons
+  // grandstands seen from the track (terrace side walls, canopy, fascia) and from behind
+  'stand-start-road': { from: ['spawn', -6, -3, 1.6], to: ['spawn', 14, 18, 7], fov: 62 },
+  'stand-start-behind': { from: ['spawn', 30, 48, 18], to: ['spawn', 0, 12, 6], fov: 55 },
   'start-old-spawn-tcam': { car: { at: ['noghes', 88], d: 1.6 }, cam: 'tcam' },
   'start-old-spawn-chase': { car: { at: ['noghes', 88], d: 1.6 }, cam: 'chase' },
   // Mirabeau approach (downhill from the Casino)
